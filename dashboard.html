@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Student Dashboard - Virtual Learning Metaverse</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="index.html">
+                <i class="fas fa-graduation-cap"></i> Virtual Learning Metaverse
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="courses.html">
+                            <i class="fas fa-book"></i> Browse Courses
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="classroom.html">
+                            <i class="fas fa-chalkboard"></i> Virtual Classroom
+                        </a>
+                    </li>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" 
+                           data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle"></i> <span id="userName">Student</span>
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="#"><i class="fas fa-user"></i> Profile</a></li>
+                            <li><a class="dropdown-item" href="#"><i class="fas fa-cog"></i> Settings</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><a class="dropdown-item" href="index.html" onclick="logout()">
+                                <i class="fas fa-sign-out-alt"></i> Logout</a></li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Dashboard Header -->
+    <section class="dashboard-header bg-light py-4">
+        <div class="container-fluid">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h2 class="mb-2">Welcome back, <span id="dashboardUserName">Student</span>! 👋</h2>
+                    <p class="text-muted mb-0">
+                        <i class="fas fa-calendar-alt"></i> Today is <span id="currentDate"></span>
+                    </p>
+                </div>
+                <div class="col-md-4 text-end">
+                    <button class="btn btn-primary" onclick="window.location.href='classroom.html'">
+                        <i class="fas fa-play"></i> Join Live Class
+                    </button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Dashboard Content -->
+    <section class="dashboard-content py-4">
+        <div class="container-fluid">
+            <div class="row g-4">
+                <!-- Left Sidebar -->
+                <div class="col-md-3">
+                    <!-- Student Profile Card -->
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-body text-center">
+                            <div class="profile-avatar mb-3">
+                                <i class="fas fa-user-circle fa-5x text-primary"></i>
+                            </div>
+                            <h5 class="mb-1" id="profileName">Student Name</h5>
+                            <p class="text-muted mb-2" id="profileEmail">student@example.com</p>
+                            <p class="mb-3"><strong>Enrollment:</strong> <span id="enrollmentNo">0901AD221007</span></p>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-sm btn-outline-primary">
+                                    <i class="fas fa-edit"></i> Edit Profile
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Stats -->
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-primary text-white">
+                            <i class="fas fa-chart-line"></i> Quick Stats
+                        </div>
+                        <div class="card-body">
+                            <div class="stat-item mb-3">
+                                <div class="d-flex justify-content-between">
+                                    <span><i class="fas fa-book text-primary"></i> Enrolled Courses</span>
+                                    <strong id="enrolledCount">3</strong>
+                                </div>
+                            </div>
+                            <div class="stat-item mb-3">
+                                <div class="d-flex justify-content-between">
+                                    <span><i class="fas fa-check-circle text-success"></i> Completed</span>
+                                    <strong id="completedCount">1</strong>
+                                </div>
+                            </div>
+                            <div class="stat-item mb-3">
+                                <div class="d-flex justify-content-between">
+                                    <span><i class="fas fa-clock text-warning"></i> In Progress</span>
+                                    <strong id="progressCount">2</strong>
+                                </div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="d-flex justify-content-between">
+                                    <span><i class="fas fa-certificate text-info"></i> Certificates</span>
+                                    <strong id="certificateCount">1</strong>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Content Area -->
+                <div class="col-md-9">
+                    <!-- Stats Cards Row -->
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-3">
+                            <div class="stat-card card shadow-sm border-start border-primary border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <p class="text-muted mb-1 small">Learning Hours</p>
+                                            <h4 class="mb-0">42.5</h4>
+                                        </div>
+                                        <div class="stat-icon">
+                                            <i class="fas fa-clock fa-2x text-primary"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card card shadow-sm border-start border-success border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <p class="text-muted mb-1 small">Avg. Score</p>
+                                            <h4 class="mb-0">85%</h4>
+                                        </div>
+                                        <div class="stat-icon">
+                                            <i class="fas fa-chart-line fa-2x text-success"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card card shadow-sm border-start border-warning border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <p class="text-muted mb-1 small">Assignments</p>
+                                            <h4 class="mb-0">12/15</h4>
+                                        </div>
+                                        <div class="stat-icon">
+                                            <i class="fas fa-tasks fa-2x text-warning"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="stat-card card shadow-sm border-start border-info border-4">
+                                <div class="card-body">
+                                    <div class="d-flex justify-content-between">
+                                        <div>
+                                            <p class="text-muted mb-1 small">Attendance</p>
+                                            <h4 class="mb-0">92%</h4>
+                                        </div>
+                                        <div class="stat-icon">
+                                            <i class="fas fa-user-check fa-2x text-info"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- My Courses Tab -->
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0"><i class="fas fa-graduation-cap"></i> My Courses</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3" id="enrolledCoursesList">
+                                <!-- Course 1 -->
+                                <div class="col-md-6">
+                                    <div class="course-progress-card card border">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between mb-2">
+                                                <h6>Introduction to Programming</h6>
+                                                <span class="badge bg-warning">In Progress</span>
+                                            </div>
+                                            <p class="text-muted small mb-2">Learn Python basics and programming fundamentals</p>
+                                            <div class="progress mb-2" style="height: 8px;">
+                                                <div class="progress-bar bg-primary" role="progressbar" 
+                                                     style="width: 65%" aria-valuenow="65" aria-valuemin="0" aria-valuemax="100"></div>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <small class="text-muted">65% Complete</small>
+                                                <button class="btn btn-sm btn-primary" onclick="window.location.href='classroom.html'">
+                                                    Continue
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Course 2 -->
+                                <div class="col-md-6">
+                                    <div class="course-progress-card card border">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between mb-2">
+                                                <h6>English Communication</h6>
+                                                <span class="badge bg-warning">In Progress</span>
+                                            </div>
+                                            <p class="text-muted small mb-2">Improve speaking and writing skills</p>
+                                            <div class="progress mb-2" style="height: 8px;">
+                                                <div class="progress-bar bg-primary" role="progressbar" 
+                                                     style="width: 40%" aria-valuenow="40" aria-valuemin="0" aria-valuemax="100"></div>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <small class="text-muted">40% Complete</small>
+                                                <button class="btn btn-sm btn-primary" onclick="window.location.href='classroom.html'">
+                                                    Continue
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Course 3 -->
+                                <div class="col-md-6">
+                                    <div class="course-progress-card card border">
+                                        <div class="card-body">
+                                            <div class="d-flex justify-content-between mb-2">
+                                                <h6>Digital Literacy</h6>
+                                                <span class="badge bg-success">Completed</span>
+                                            </div>
+                                            <p class="text-muted small mb-2">Essential computer and digital skills</p>
+                                            <div class="progress mb-2" style="height: 8px;">
+                                                <div class="progress-bar bg-success" role="progressbar" 
+                                                     style="width: 100%" aria-valuenow="100" aria-valuemin="0" aria-valuemax="100"></div>
+                                            </div>
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <small class="text-success">✓ Completed</small>
+                                                <button class="btn btn-sm btn-success">
+                                                    <i class="fas fa-certificate"></i> Certificate
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upcoming Classes -->
+                    <div class="card shadow-sm mb-4">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0"><i class="fas fa-calendar-alt"></i> Upcoming Classes</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="list-group list-group-flush">
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">Introduction to Programming - Lecture 8</h6>
+                                            <p class="mb-0 text-muted small">
+                                                <i class="fas fa-clock"></i> Today, 2:00 PM - 3:30 PM
+                                            </p>
+                                        </div>
+                                        <button class="btn btn-sm btn-success" onclick="window.location.href='classroom.html'">
+                                            Join Now
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="list-group-item">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <h6 class="mb-1">English Communication - Practice Session</h6>
+                                            <p class="mb-0 text-muted small">
+                                                <i class="fas fa-clock"></i> Tomorrow, 11:00 AM - 12:00 PM
+                                            </p>
+                                        </div>
+                                        <button class="btn btn-sm btn-outline-primary">
+                                            Set Reminder
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Achievements -->
+                    <div class="card shadow-sm">
+                        <div class="card-header bg-white">
+                            <h5 class="mb-0"><i class="fas fa-trophy"></i> Recent Achievements</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="row g-3">
+                                <div class="col-md-4">
+                                    <div class="achievement-badge text-center p-3 border rounded">
+                                        <i class="fas fa-medal fa-3x text-warning mb-2"></i>
+                                        <h6>First Course Completed</h6>
+                                        <small class="text-muted">Earned 2 days ago</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="achievement-badge text-center p-3 border rounded">
+                                        <i class="fas fa-fire fa-3x text-danger mb-2"></i>
+                                        <h6>5 Day Streak</h6>
+                                        <small class="text-muted">Keep it up!</small>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="achievement-badge text-center p-3 border rounded">
+                                        <i class="fas fa-star fa-3x text-info mb-2"></i>
+                                        <h6>Top Performer</h6>
+                                        <small class="text-muted">This week</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer py-3 bg-dark text-white text-center mt-5">
+        <p class="mb-0">&copy; 2025 Virtual Learning Metaverse | Aniket Kag, Bhupendra Meena, Yashwani Patidar</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Set current date
+        document.getElementById('currentDate').textContent = new Date().toLocaleDateString('en-US', {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+        });
+
+        // Check if user is logged in
+        window.addEventListener('load', function() {
+            const isLoggedIn = sessionStorage.getItem('isLoggedIn');
+            const userEmail = sessionStorage.getItem('userEmail');
+            
+            if (isLoggedIn && userEmail) {
+                document.getElementById('userName').textContent = userEmail.split('@')[0];
+                document.getElementById('dashboardUserName').textContent = userEmail.split('@')[0];
+                document.getElementById('profileEmail').textContent = userEmail;
+            } else {
+                // Redirect to login if not logged in
+                // window.location.href = 'login.html';
+            }
+        });
+
+        // Logout function
+        function logout() {
+            sessionStorage.clear();
+            alert('Logged out successfully!');
+        }
+    </script>
+</body>
+</html>

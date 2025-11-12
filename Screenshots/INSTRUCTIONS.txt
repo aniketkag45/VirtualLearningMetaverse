@@ -1,0 +1,143 @@
+📸 SCREENSHOT INSTRUCTIONS - FOLLOW THESE STEPS EXACTLY
+=====================================================
+
+The Screenshots folder is created at:
+C:\Users\DELL\OneDrive\Desktop\aniket 7th sem\VirtualLearningMetaverse\Screenshots\
+
+HOW TO TAKE SCREENSHOTS:
+========================
+
+Method 1 (Recommended): Windows Snipping Tool
+----------------------------------------------
+1. Press: Windows Key + Shift + S
+2. Screen will dim
+3. Click and drag to select the area
+4. Screenshot is copied to clipboard
+5. Open Paint (search "Paint" in Start menu)
+6. Press Ctrl + V to paste
+7. File → Save As → Navigate to Screenshots folder
+8. Save with the name mentioned below
+
+Method 2: Print Screen Button
+----------------------------------------------
+1. Press: PrtSc button on keyboard (copies full screen)
+2. Open Paint
+3. Press Ctrl + V
+4. Crop if needed
+5. Save to Screenshots folder
+
+Method 3: Snipping Tool App
+----------------------------------------------
+1. Search "Snipping Tool" in Start menu
+2. Click New
+3. Select area
+4. File → Save As → Screenshots folder
+
+
+NOW TAKE THESE 12 SCREENSHOTS:
+================================
+
+✅ SCREENSHOT 1: Landing Page Hero
+   Browser is ALREADY OPEN with index.html
+   → Scroll to the TOP
+   → Capture the "Welcome to Virtual Learning Metaverse" section
+   → Save as: 01_landing_page_hero.png
+
+✅ SCREENSHOT 2: Features Section
+   → Scroll DOWN on same page
+   → Capture the 6 feature cards (3D Classrooms, AI Learning, etc.)
+   → Save as: 02_features_section.png
+
+✅ SCREENSHOT 3: Statistics
+   → Scroll DOWN more
+   → Capture "500+ Courses, 10,000+ Students" section
+   → Save as: 03_statistics.png
+
+✅ SCREENSHOT 4: Problem vs Solution
+   → Scroll DOWN more
+   → Capture the comparison section
+   → Save as: 04_problem_solution.png
+
+Now click "Get Started" button or type in address bar: login.html
+
+✅ SCREENSHOT 5: Login Page
+   → Capture the login form with "Student Demo", "Teacher Demo" buttons
+   → Save as: 05_login_page.png
+
+Now click "Student Demo" button
+
+✅ SCREENSHOT 6: Dashboard Overview
+   → You're now on dashboard.html
+   → Scroll to TOP
+   → Capture entire dashboard (profile card + stats)
+   → Save as: 06_dashboard_overview.png
+
+✅ SCREENSHOT 7: Enrolled Courses
+   → Scroll DOWN on dashboard
+   → Capture "My Enrolled Courses" section with progress bars
+   → Save as: 07_enrolled_courses.png
+
+✅ SCREENSHOT 8: Upcoming Classes
+   → Scroll DOWN on dashboard
+   → Capture "Upcoming Classes" schedule
+   → Save as: 08_upcoming_classes.png
+
+Now click "Browse Courses" button in navigation bar
+
+✅ SCREENSHOT 9: Course Catalog
+   → You're now on courses.html
+   → Capture the course cards with search bar
+   → Save as: 09_course_catalog.png
+
+Now type "Programming" in the search box
+
+✅ SCREENSHOT 10: Search Results
+   → Capture filtered course results
+   → Save as: 10_search_results.png
+
+Now go back to Dashboard and click "Join Now" on first upcoming class
+
+✅ SCREENSHOT 11: 3D Virtual Classroom
+   → Wait 5-10 seconds for 3D scene to load
+   → Capture the 3D classroom with whiteboard and avatars
+   → Save as: 11_3d_classroom.png
+
+✅ SCREENSHOT 12: Classroom Tools
+   → Scroll DOWN on classroom page
+   → Capture the tools panel at bottom (Raise Hand, Mic, Video buttons)
+   → Save as: 12_classroom_tools.png
+
+BONUS (OPTIONAL):
+
+✅ SCREENSHOT 13: Mobile View
+   → Press F12 (Developer Tools)
+   → Click device icon (or press Ctrl + Shift + M)
+   → Select "iPhone 12 Pro" or any mobile device
+   → Go back to index.html
+   → Capture mobile responsive view
+   → Save as: 13_mobile_responsive.png
+
+
+AFTER TAKING ALL SCREENSHOTS:
+==============================
+
+1. Go to: C:\Users\DELL\OneDrive\Desktop\aniket 7th sem\VirtualLearningMetaverse\Screenshots\
+
+2. Verify you have 12-13 PNG files
+
+3. Check each image opens properly
+
+4. They're ready to insert into your Word report!
+
+
+QUICK TIPS:
+===========
+- Take full-page screenshots (don't cut off content)
+- Make sure text is readable
+- Use good lighting on screen
+- Close unnecessary tabs/windows
+- If blurry, retake the screenshot
+
+
+YOU'RE DOING GREAT! 
+Once screenshots are done, we'll create the Word report next! 📝

@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Classroom - Metaverse Learning Platform</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- A-Frame for VR/3D -->
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="index.html">
+                <i class="fas fa-graduation-cap"></i> Virtual Learning Metaverse
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="dashboard.html">
+                    <i class="fas fa-home"></i> Dashboard
+                </a>
+                <a class="nav-link" href="courses.html">
+                    <i class="fas fa-book"></i> Courses
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Classroom Info Panel -->
+    <div class="classroom-info-panel bg-light p-3 border-bottom">
+        <div class="container-fluid">
+            <div class="row align-items-center">
+                <div class="col-md-4">
+                    <h5 class="mb-0">
+                        <i class="fas fa-chalkboard-teacher text-primary"></i> 
+                        <strong>Course:</strong> Introduction to Programming
+                    </h5>
+                </div>
+                <div class="col-md-4 text-center">
+                    <span class="badge bg-success me-2">
+                        <i class="fas fa-users"></i> 24 Students Online
+                    </span>
+                    <span class="badge bg-info">
+                        <i class="fas fa-clock"></i> Live Session
+                    </span>
+                </div>
+                <div class="col-md-4 text-end">
+                    <button class="btn btn-sm btn-outline-primary me-2" onclick="toggleControls()">
+                        <i class="fas fa-cog"></i> Controls
+                    </button>
+                    <button class="btn btn-sm btn-outline-success" onclick="toggleFullscreen()">
+                        <i class="fas fa-expand"></i> Fullscreen
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Controls Panel (Initially Hidden) -->
+    <div id="controlsPanel" class="controls-panel bg-white p-3 border-bottom" style="display:none;">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-12">
+                    <h6 class="mb-3"><i class="fas fa-gamepad"></i> Classroom Controls</h6>
+                    <div class="btn-group mb-2" role="group">
+                        <button class="btn btn-sm btn-outline-primary" onclick="changeView('front')">
+                            <i class="fas fa-eye"></i> Front View
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="changeView('side')">
+                            <i class="fas fa-eye"></i> Side View
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary" onclick="changeView('top')">
+                            <i class="fas fa-eye"></i> Top View
+                        </button>
+                    </div>
+                    <p class="text-muted small mb-0">
+                        <i class="fas fa-info-circle"></i> Use mouse to look around. WASD keys to move (if VR enabled).
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3D Virtual Classroom Scene -->
+    <div class="classroom-container">
+        <a-scene embedded vr-mode-ui="enabled: true">
+            <!-- Sky/Background -->
+            <a-sky color="#87CEEB"></a-sky>
+            
+            <!-- Ambient Light -->
+            <a-light type="ambient" color="#BBB"></a-light>
+            <a-light type="directional" color="#FFF" intensity="0.6" position="-0.5 1 1"></a-light>
+
+            <!-- Floor -->
+            <a-plane position="0 0 0" rotation="-90 0 0" width="20" height="20" 
+                     color="#8B4513" shadow></a-plane>
+
+            <!-- Walls -->
+            <!-- Back Wall -->
+            <a-box position="0 2.5 -5" width="20" height="5" depth="0.1" 
+                   color="#E8E8E8" shadow></a-box>
+            
+            <!-- Left Wall -->
+            <a-box position="-10 2.5 5" rotation="0 90 0" width="20" height="5" depth="0.1" 
+                   color="#F0F0F0" shadow></a-box>
+            
+            <!-- Right Wall -->
+            <a-box position="10 2.5 5" rotation="0 90 0" width="20" height="5" depth="0.1" 
+                   color="#F0F0F0" shadow></a-box>
+
+            <!-- Whiteboard -->
+            <a-box position="0 2.5 -4.9" width="8" height="3" depth="0.1" 
+                   color="#FFFFFF" shadow>
+                <a-text value="Virtual Learning Platform" 
+                        color="#000000" 
+                        align="center" 
+                        position="0 0.8 0.1" 
+                        width="6"></a-text>
+                <a-text value="Today's Topic: Introduction to Programming" 
+                        color="#1E90FF" 
+                        align="center" 
+                        position="0 0.3 0.1" 
+                        width="5"></a-text>
+                <a-text value="Teacher: Prof. Sharma" 
+                        color="#666666" 
+                        align="center" 
+                        position="0 -0.2 0.1" 
+                        width="4"></a-text>
+            </a-box>
+
+            <!-- Teacher's Desk -->
+            <a-box position="0 0.5 -3" width="2" height="1" depth="1" 
+                   color="#8B4513" shadow></a-box>
+            
+            <!-- Teacher Avatar -->
+            <a-cylinder position="0 1.5 -3" radius="0.3" height="1.5" 
+                        color="#4169E1" shadow>
+                <a-sphere position="0 1 0" radius="0.3" color="#FFD700"></a-sphere>
+                <a-text value="Teacher" 
+                        color="#FFFFFF" 
+                        align="center" 
+                        position="0 -1 0" 
+                        width="3"></a-text>
+            </a-cylinder>
+
+            <!-- Student Desks and Chairs - Row 1 -->
+            <!-- Desk 1 -->
+            <a-box position="-3 0.4 0" width="1.5" height="0.8" depth="1" 
+                   color="#8B4513" shadow></a-box>
+            <a-cylinder position="-3 1.2 0" radius="0.2" height="1" 
+                        color="#32CD32" shadow>
+                <a-sphere position="0 0.6 0" radius="0.15" color="#FFE4B5"></a-sphere>
+            </a-cylinder>
+            
+            <!-- Desk 2 -->
+            <a-box position="0 0.4 0" width="1.5" height="0.8" depth="1" 
+                   color="#8B4513" shadow></a-box>
+            <a-cylinder position="0 1.2 0" radius="0.2" height="1" 
+                        color="#FF6347" shadow>
+                <a-sphere position="0 0.6 0" radius="0.15" color="#FFE4B5"></a-sphere>
+            </a-cylinder>
+            
+            <!-- Desk 3 -->
+            <a-box position="3 0.4 0" width="1.5" height="0.8" depth="1" 
+                   color="#8B4513" shadow></a-box>
+            <a-cylinder position="3 1.2 0" radius="0.2" height="1" 
+                        color="#9370DB" shadow>
+                <a-sphere position="0 0.6 0" radius="0.15" color="#FFE4B5"></a-sphere>
+            </a-cylinder>
+
+            <!-- Student Desks - Row 2 -->
+            <!-- Desk 4 -->
+            <a-box position="-3 0.4 2.5" width="1.5" height="0.8" depth="1" 
+                   color="#8B4513" shadow></a-box>
+            <a-cylinder position="-3 1.2 2.5" radius="0.2" height="1" 
+                        color="#FF1493" shadow>
+                <a-sphere position="0 0.6 0" radius="0.15" color="#FFE4B5"></a-sphere>
+            </a-cylinder>
+            
+            <!-- Desk 5 -->
+            <a-box position="0 0.4 2.5" width="1.5" height="0.8" depth="1" 
+                   color="#8B4513" shadow></a-box>
+            <a-cylinder position="0 1.2 2.5" radius="0.2" height="1" 
+                        color="#FF8C00" shadow>
+                <a-sphere position="0 0.6 0" radius="0.15" color="#FFE4B5"></a-sphere>
+            </a-cylinder>
+            
+            <!-- Desk 6 -->
+            <a-box position="3 0.4 2.5" width="1.5" height="0.8" depth="1" 
+                   color="#8B4513" shadow></a-box>
+            <a-cylinder position="3 1.2 2.5" radius="0.2" height="1" 
+                        color="#00CED1" shadow>
+                <a-sphere position="0 0.6 0" radius="0.15" color="#FFE4B5"></a-sphere>
+            </a-cylinder>
+
+            <!-- Decorative Elements -->
+            <!-- Clock on wall -->
+            <a-circle position="-8 4 -4.8" radius="0.5" color="#000000" shadow></a-circle>
+            
+            <!-- Notice Board -->
+            <a-box position="8 2.5 -4.9" width="3" height="2" depth="0.1" 
+                   color="#FFA500" shadow></a-box>
+
+            <!-- Camera (User's View) -->
+            <a-camera position="0 1.6 5" look-controls wasd-controls>
+                <a-cursor color="#4CAF50"></a-cursor>
+            </a-camera>
+        </a-scene>
+    </div>
+
+    <!-- Classroom Tools Panel -->
+    <div class="tools-panel bg-white p-3 border-top">
+        <div class="container-fluid">
+            <div class="row g-2">
+                <div class="col-md-12">
+                    <h6 class="mb-3"><i class="fas fa-tools"></i> Interactive Tools</h6>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-primary w-100" onclick="raiseHand()">
+                        <i class="fas fa-hand-paper"></i><br>
+                        <small>Raise Hand</small>
+                    </button>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-success w-100" onclick="toggleMic()">
+                        <i class="fas fa-microphone"></i><br>
+                        <small>Mic On/Off</small>
+                    </button>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-info w-100" onclick="toggleVideo()">
+                        <i class="fas fa-video"></i><br>
+                        <small>Camera On/Off</small>
+                    </button>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-warning w-100" onclick="openChat()">
+                        <i class="fas fa-comments"></i><br>
+                        <small>Chat</small>
+                    </button>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-secondary w-100" onclick="shareScreen()">
+                        <i class="fas fa-desktop"></i><br>
+                        <small>Share Screen</small>
+                    </button>
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-outline-danger w-100" onclick="leaveClass()">
+                        <i class="fas fa-sign-out-alt"></i><br>
+                        <small>Leave Class</small>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Feature Showcase Panel -->
+    <div class="feature-showcase bg-light p-4 mt-3">
+        <div class="container">
+            <h5 class="mb-3"><i class="fas fa-star"></i> Virtual Classroom Features</h5>
+            <div class="row g-3">
+                <div class="col-md-3">
+                    <div class="feature-item p-3 bg-white rounded shadow-sm">
+                        <i class="fas fa-cube fa-2x text-primary mb-2"></i>
+                        <h6>3D Environment</h6>
+                        <small>Immersive 3D classroom with realistic elements</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="feature-item p-3 bg-white rounded shadow-sm">
+                        <i class="fas fa-users fa-2x text-success mb-2"></i>
+                        <h6>Multi-User Support</h6>
+                        <small>Multiple students can join simultaneously</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="feature-item p-3 bg-white rounded shadow-sm">
+                        <i class="fas fa-chalkboard fa-2x text-info mb-2"></i>
+                        <h6>Interactive Whiteboard</h6>
+                        <small>Real-time content display and interaction</small>
+                    </div>
+                </div>
+                <div class="col-md-3">
+                    <div class="feature-item p-3 bg-white rounded shadow-sm">
+                        <i class="fas fa-vr-cardboard fa-2x text-warning mb-2"></i>
+                        <h6>VR Compatible</h6>
+                        <small>Works with VR headsets for full immersion</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Toggle Controls Panel
+        function toggleControls() {
+            const panel = document.getElementById('controlsPanel');
+            panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+        }
+
+        // Toggle Fullscreen
+        function toggleFullscreen() {
+            const scene = document.querySelector('a-scene');
+            if (!document.fullscreenElement) {
+                scene.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // Change Camera View
+        function changeView(view) {
+            const camera = document.querySelector('a-camera');
+            switch(view) {
+                case 'front':
+                    camera.setAttribute('position', '0 1.6 5');
+                    break;
+                case 'side':
+                    camera.setAttribute('position', '8 1.6 0');
+                    camera.setAttribute('rotation', '0 -90 0');
+                    break;
+                case 'top':
+                    camera.setAttribute('position', '0 10 0');
+                    camera.setAttribute('rotation', '-90 0 0');
+                    break;
+            }
+        }
+
+        // Interactive Tool Functions
+        function raiseHand() {
+            alert('✋ Hand Raised! Teacher will be notified.');
+        }
+
+        function toggleMic() {
+            alert('🎤 Microphone toggled (Demo Mode)');
+        }
+
+        function toggleVideo() {
+            alert('📹 Camera toggled (Demo Mode)');
+        }
+
+        function openChat() {
+            alert('💬 Chat feature will open (Demo Mode)');
+        }
+
+        function shareScreen() {
+            alert('🖥️ Screen sharing initiated (Demo Mode)');
+        }
+
+        function leaveClass() {
+            if(confirm('Are you sure you want to leave the classroom?')) {
+                window.location.href = 'dashboard.html';
+            }
+        }
+
+        // Welcome Message
+        window.addEventListener('load', function() {
+            setTimeout(() => {
+                alert('Welcome to Virtual Classroom! 🎓\n\nUse your mouse to look around the 3D classroom.\nClick on tools below to interact.');
+            }, 1000);
+        });
+    </script>
+</body>
+</html>

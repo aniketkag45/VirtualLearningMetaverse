@@ -1,0 +1,52 @@
+🔗 QUICK NAVIGATION GUIDE - USE THESE COMMANDS
+================================================
+
+Since clicking links might not work when opening HTML files directly,
+use these commands to open each page:
+
+COPY-PASTE THESE INTO YOUR BROWSER ADDRESS BAR:
+================================================
+
+📄 Page 1 - Landing Page:
+file:///C:/Users/DELL/OneDrive/Desktop/aniket%207th%20sem/VirtualLearningMetaverse/index.html
+
+📄 Page 2 - Login Page:
+file:///C:/Users/DELL/OneDrive/Desktop/aniket%207th%20sem/VirtualLearningMetaverse/login.html
+
+📄 Page 3 - Dashboard:
+file:///C:/Users/DELL/OneDrive/Desktop/aniket%207th%20sem/VirtualLearningMetaverse/dashboard.html
+
+📄 Page 4 - Courses:
+file:///C:/Users/DELL/OneDrive/Desktop/aniket%207th%20sem/VirtualLearningMetaverse/courses.html
+
+📄 Page 5 - Virtual Classroom (3D):
+file:///C:/Users/DELL/OneDrive/Desktop/aniket%207th%20sem/VirtualLearningMetaverse/classroom.html
+
+
+EASIER METHOD - DOUBLE CLICK THESE FILES:
+==========================================
+
+Go to folder:
+C:\Users\DELL\OneDrive\Desktop\aniket 7th sem\VirtualLearningMetaverse\
+
+Then double-click:
+1. index.html
+2. login.html
+3. dashboard.html
+4. courses.html
+5. classroom.html
+
+Each will open in a new browser tab!
+
+
+FOR SCREENSHOTS - FOLLOW THIS ORDER:
+=====================================
+
+1. Open index.html → Take screenshots 1-4
+2. Open login.html → Take screenshot 5
+3. Open dashboard.html → Take screenshots 6-8
+4. Open courses.html → Take screenshots 9-10
+5. Open classroom.html → Take screenshots 11-12
+
+
+TIP: Keep all pages open in different browser tabs for easy switching!

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Virtual Learning Metaverse</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="index.html">
+                <i class="fas fa-graduation-cap"></i> Virtual Learning Metaverse
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.html">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="courses.html">Courses</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="classroom.html">Virtual Classroom</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Login Section -->
+    <section class="login-section min-vh-100 d-flex align-items-center">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-md-8 col-lg-6">
+                    <div class="login-card p-5 shadow-lg">
+                        <div class="text-center mb-4">
+                            <i class="fas fa-user-circle fa-4x text-primary mb-3"></i>
+                            <h2 class="fw-bold">Welcome Back!</h2>
+                            <p class="text-muted">Login to access your virtual classroom</p>
+                        </div>
+
+                        <!-- Login Form -->
+                        <form id="loginForm" onsubmit="handleLogin(event)">
+                            <div class="mb-3">
+                                <label for="userType" class="form-label">
+                                    <i class="fas fa-user-tag"></i> User Type
+                                </label>
+                                <select class="form-select" id="userType" required>
+                                    <option value="">Select User Type</option>
+                                    <option value="student">Student</option>
+                                    <option value="teacher">Teacher</option>
+                                    <option value="admin">Administrator</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="email" class="form-label">
+                                    <i class="fas fa-envelope"></i> Email / Enrollment Number
+                                </label>
+                                <input type="text" class="form-control" id="email" 
+                                       placeholder="Enter your email or enrollment number" required>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="password" class="form-label">
+                                    <i class="fas fa-lock"></i> Password
+                                </label>
+                                <input type="password" class="form-control" id="password" 
+                                       placeholder="Enter your password" required>
+                            </div>
+
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="rememberMe">
+                                <label class="form-check-label" for="rememberMe">
+                                    Remember me
+                                </label>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary w-100 mb-3">
+                                <i class="fas fa-sign-in-alt"></i> Login
+                            </button>
+
+                            <div class="text-center">
+                                <a href="#" class="text-decoration-none">Forgot Password?</a>
+                            </div>
+                        </form>
+
+                        <hr class="my-4">
+
+                        <!-- Register Section -->
+                        <div class="text-center">
+                            <p class="mb-2">Don't have an account?</p>
+                            <button class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#registerModal">
+                                <i class="fas fa-user-plus"></i> Register Now
+                            </button>
+                        </div>
+
+                        <!-- Quick Demo Access -->
+                        <div class="demo-access mt-4 p-3 bg-light rounded">
+                            <p class="mb-2 fw-bold text-center">Quick Demo Access:</p>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-sm btn-success" onclick="demoLogin('student')">
+                                    <i class="fas fa-user-graduate"></i> Login as Student
+                                </button>
+                                <button class="btn btn-sm btn-info" onclick="demoLogin('teacher')">
+                                    <i class="fas fa-chalkboard-teacher"></i> Login as Teacher
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Registration Modal -->
+    <div class="modal fade" id="registerModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">
+                        <i class="fas fa-user-plus"></i> Register New Account
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="registerForm" onsubmit="handleRegister(event)">
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="regFirstName" class="form-label">First Name *</label>
+                                <input type="text" class="form-control" id="regFirstName" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="regLastName" class="form-label">Last Name *</label>
+                                <input type="text" class="form-control" id="regLastName" required>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="regEmail" class="form-label">Email Address *</label>
+                            <input type="email" class="form-control" id="regEmail" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="regPhone" class="form-label">Phone Number *</label>
+                            <input type="tel" class="form-control" id="regPhone" required>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="regUserType" class="form-label">Register As *</label>
+                            <select class="form-select" id="regUserType" required>
+                                <option value="">Select Type</option>
+                                <option value="student">Student</option>
+                                <option value="teacher">Teacher</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3" id="enrollmentField" style="display:none;">
+                            <label for="regEnrollment" class="form-label">Enrollment Number</label>
+                            <input type="text" class="form-control" id="regEnrollment">
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-6 mb-3">
+                                <label for="regPassword" class="form-label">Password *</label>
+                                <input type="password" class="form-control" id="regPassword" required>
+                            </div>
+                            <div class="col-md-6 mb-3">
+                                <label for="regConfirmPassword" class="form-label">Confirm Password *</label>
+                                <input type="password" class="form-control" id="regConfirmPassword" required>
+                            </div>
+                        </div>
+
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="agreeTerms" required>
+                            <label class="form-check-label" for="agreeTerms">
+                                I agree to the Terms and Conditions
+                            </label>
+                        </div>
+
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="fas fa-user-plus"></i> Create Account
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer py-3 bg-dark text-white text-center">
+        <p class="mb-0">&copy; 2025 Virtual Learning Metaverse | Aniket Kag, Bhupendra Meena, Yashwani Patidar</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/script.js"></script>
+    <script>
+        // Show/hide enrollment field based on user type
+        document.getElementById('regUserType').addEventListener('change', function() {
+            const enrollmentField = document.getElementById('enrollmentField');
+            if(this.value === 'student') {
+                enrollmentField.style.display = 'block';
+            } else {
+                enrollmentField.style.display = 'none';
+            }
+        });
+
+        // Handle Login Form Submission
+        function handleLogin(event) {
+            event.preventDefault();
+            const userType = document.getElementById('userType').value;
+            const email = document.getElementById('email').value;
+            
+            // Store user info in sessionStorage (can be connected to backend later)
+            sessionStorage.setItem('userType', userType);
+            sessionStorage.setItem('userEmail', email);
+            sessionStorage.setItem('isLoggedIn', 'true');
+            
+            alert('Login Successful! Welcome to Virtual Learning Metaverse');
+            window.location.href = 'dashboard.html';
+        }
+
+        // Handle Registration Form Submission
+        function handleRegister(event) {
+            event.preventDefault();
+            const password = document.getElementById('regPassword').value;
+            const confirmPassword = document.getElementById('regConfirmPassword').value;
+            
+            if(password !== confirmPassword) {
+                alert('Passwords do not match!');
+                return;
+            }
+            
+            alert('Registration Successful! Please login to continue.');
+            bootstrap.Modal.getInstance(document.getElementById('registerModal')).hide();
+            document.getElementById('registerForm').reset();
+        }
+
+        // Demo Login Function
+        function demoLogin(type) {
+            sessionStorage.setItem('userType', type);
+            sessionStorage.setItem('userEmail', `demo_${type}@example.com`);
+            sessionStorage.setItem('isLoggedIn', 'true');
+            
+            alert(`Demo Login Successful as ${type.charAt(0).toUpperCase() + type.slice(1)}!`);
+            window.location.href = 'dashboard.html';
+        }
+    </script>
+</body>
+</html>
