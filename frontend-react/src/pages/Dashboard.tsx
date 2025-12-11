@@ -9,17 +9,26 @@ import { BookOpen,TrendingUp,Target,Award } from "lucide-react";
 
 const Dashboard = () => {
   const { user } = useAuthStore();
-  const { enrolledCourses } = useCourseStore();
+  const { enrolledCourses,getCourseProgress } = useCourseStore();
 
   const totalCourses = enrolledCourses.length;
 
   const averageProgress = enrolledCourses.length > 0
-    ? Math.floor(enrolledCourses.reduce((sum, course) => sum + course.progress, 0) / enrolledCourses.length)
+    ? Math.round(enrolledCourses.reduce((sum, course) => {
+      const progress = getCourseProgress(course.courseId.toString());
+      return sum + progress;
+    }, 0) / enrolledCourses.length)
     : 0;  
 
-    const courseInProgress = enrolledCourses.filter(course => course.progress < 100).length;
+    const courseInProgress = enrolledCourses.filter(course => {
+      const progress = getCourseProgress(course.courseId.toString());
+      return progress > 0 && progress < 100;
+    }).length;
 
-    const completedCourses = enrolledCourses.filter(course => course.progress === 100).length;
+    const completedCourses = enrolledCourses.filter(course => {
+      const progress = getCourseProgress(course.courseId.toString());
+      return progress === 100;
+    }).length;
 
   return (
     <div className="p-8 space-y-6 bg-gray-100 min-h-screen">
@@ -71,7 +80,7 @@ const Dashboard = () => {
                 <CourseProgressCard 
                   key={course.courseId}
                   courseName={course.courseName}
-                  progress={course.progress}
+                  progress={getCourseProgress(course.courseId.toString())}
                   totalLessons={20}
                   completedLessons={Math.floor(course.progress * 20 / 100)}
                   dueDate={new Date(course.enrolledDate).toLocaleDateString()}

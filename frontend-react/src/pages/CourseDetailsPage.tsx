@@ -2,6 +2,7 @@ import {useParams} from 'react-router-dom';
 import { coursesData } from '../data/coursesData';
 import { useCourseStore } from '../stores/useCourseStore';
 import toast from 'react-hot-toast';
+import { Link } from 'react-router-dom';
 
 const CourseDetailsPage = () => {
     const { courseId } = useParams();
@@ -31,7 +32,7 @@ const CourseDetailsPage = () => {
   }`}
             onClick={() => {
                 if (!enrolled) {
-                    enrollInCourse(course.id, course.title);
+                    enrollInCourse(Number(course.id), course.title);
                     toast.success(`Enrolled in ${course.title} successfully!`);
                 }
             }}
@@ -39,6 +40,14 @@ const CourseDetailsPage = () => {
             >
                 {enrolled ? 'Enrolled' : 'Enroll Now'}
             </button>
+            {isEnrolled(Number(course.id)) && (
+  <Link 
+    to={`/course/${course.id}/learn`}
+    className="bg-green-500 text-white px-6 py-3 rounded-lg hover:bg-green-600 inline-block ml-4 mt-4"
+  >
+    Start Learning
+  </Link>
+)}
         </div>
     );
 }

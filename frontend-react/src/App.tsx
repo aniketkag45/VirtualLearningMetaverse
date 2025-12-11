@@ -14,6 +14,7 @@ import Navbar from './components/layout/Navbar'
 import CoursesPage from './pages/CoursesPage'
 import CourseDetailsPage from './pages/CourseDetailsPage'
 import ClassroomPage from './pages/ClassroomPage'
+import CourseLearningPage from './pages/CourseLearningPage'
 
 function App() {
   const initializeAuth = useAuthStore((state) => state.initializeAuth)
@@ -48,6 +49,11 @@ function App() {
 <Route path="/courses/:courseId" element={
   <ProtectedRoute>
     <CourseDetailsPage />
+  </ProtectedRoute>
+} />
+<Route path="/course/:courseId/learn" element={
+  <ProtectedRoute>
+    <CourseLearningPage />
   </ProtectedRoute>
 } />
 <Route path="/classroom" element={
