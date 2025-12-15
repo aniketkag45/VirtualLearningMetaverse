@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuthStore } from "../stores/useAuthStore";
+import { useAuthStore, User } from "../stores/useAuthStore";
 
 const LoginPage = () => {
     const [email, setEmail] = useState('');
@@ -34,8 +34,16 @@ const LoginPage = () => {
             return;
         }
 
+        const userdata: User = {
+          id: Date.now().toString(),
+          email: email,
+          name: email.split('@')[0],
+          userType: email.includes('teacher') || email.includes('instructor') ? 'teacher' : 'student'
+        };
+
+      
         // Call the login function from the auth store
-        login(email);
+        login(userdata);
         // For now, just log the credentials
         console.log('Email:', email, 'Password:', password);
         
