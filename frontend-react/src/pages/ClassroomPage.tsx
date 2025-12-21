@@ -6,6 +6,9 @@ import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '../stores/useAuthStore';
 import toast, { Toaster } from 'react-hot-toast';
+import MetaverseScene from '../components/metaverse/MetaverseScene';
+import { spatialAudioManager } from '../utils/spatialAudio';
+import { peerManager } from '../utils/peerManager';
 
 const playSound = (soundType: 'join' | 'leave' | 'message'|'notification') => {
     const frequencies : { [key: string]: number } = {
@@ -55,6 +58,22 @@ const ClassroomPage = () => {
     const [sessionDuration, setSessionDuration] = useState(0);
      const [participants, setParticipants] = useState<Participant[]>([]);
     const [typingUsers, setTypingUsers] = useState<string[]>([]);
+    const [isMetaverseMode, setIsMetaverseMode] = useState(false);
+    const [avatars, setAvatars] = useState<any[]>([]);
+    const [localStream,setLocalStream] = useState<MediaStream | null>(null);
+    const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({}); // Store remote peer streams
+    const [mySocketId, setMySocketId] = useState<string>(''); // Track our socket ID
+    const localVideoRef = useRef<HTMLVideoElement>(null);
+    const remoteVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
+    const selfVideoRef = useRef<HTMLVideoElement>(null);
+    const localStreamReadyRef = useRef(false);
+
+
+
+    /* 🔐 IMPORTANT: Track created peers */
+  const createdPeersRef = useRef<Set<string>>(new Set());
+
+
 const participantsRef = useRef<Participant[]>([]);
 useEffect(() => {
     participantsRef.current = participants;
@@ -119,6 +138,8 @@ const handleToggleMic = () => {
     const newMuteState = !isMuted;
     setIsMuted(newMuteState);
 
+    peerManager.setAudioEnabled(!newMuteState);
+
 // If unmuting, clear force muted state
     if (!newMuteState) {
         setIsForceMuted(false);
@@ -136,6 +157,15 @@ const handleToggleMic = () => {
 const handleToggleCamera = () => {
     const newVideoState = !isVideoOff;
     setIsVideoOff(newVideoState);
+
+    //update local stream video track
+    peerManager.setVideoEnabled(!newVideoState);
+    
+    // Re-attach stream to video element when enabling camera
+    if (localStream && localVideoRef.current && !newVideoState) {
+        localVideoRef.current.srcObject = localStream;
+    }
+    
     if (socketRef.current) {
         socketRef.current.emit('toggle-video', {
             classroomId: classroomId,
@@ -169,6 +199,7 @@ const handleRemoveParticipant = (participantId: string) => {
     }
 }
 
+
 const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 const handleTyping = () => {
@@ -199,30 +230,48 @@ const handleStopTyping = () => {
     }
 }
 
+const handlePositionUpdate = (position: any, rotation: any) => {
+    if(socketRef.current && isMetaverseMode) {
+        socketRef.current.emit('avatar-move', {
+            classroomId: classroomId,
+            position: position,
+            rotation: rotation,
+        });
+    }
+};
+
+const toggleMetaverseMode = () => {
+    setIsMetaverseMode(!isMetaverseMode);
+}
+
     // Connect to Socket.io server
 useEffect(() => {
     socketRef.current = io('http://localhost:3001');
     
-    // Join classroom
-    socketRef.current.emit('join-classroom', {
-        classroomId: classroomId,
-        userName: user?.name || 'Guest',
-        role: user?.userType === 'teacher' ? 'instructor' : 'student'
+    // Store our socket ID for identifying ourselves
+    socketRef.current.on('connect', () => {
+        console.log('🔌 Connected with socket ID:', socketRef.current?.id);
+        setMySocketId(socketRef.current?.id || '');
     });
 
     // Listen for new users
     socketRef.current.on('user-joined', ({ participants }) => {
         setParticipants(participants);
         const newParticipant = participants[participants.length - 1];
-            if(newParticipant && newParticipant.id !== user?.id) {
+            if(newParticipant && newParticipant.id !== socketRef.current?.id) {
                 playSound('join');
                 toast.success(`${newParticipant.name} has joined the classroom.`, {
                     icon: '👋',
                     duration: 3000,
                 });
+
+                //create  peer connection (you are the initiator because you joined first)
+                //concept : existing user initiate connection to new user
+                peerManager.createPeer(newParticipant.id, true);
             }
         
     });
+
 
     // Listen for messages
     socketRef.current.on('receive-message', (message) => {
@@ -242,7 +291,23 @@ useEffect(() => {
             icon: '👋',
             duration: 3000,
         });
+        //cleanup peer connection
+        peerManager.destroyPeer(leftParticipant.id);
+        spatialAudioManager.removePeerAudio(leftParticipant.id);
     }
+    });
+
+    //handle WebRTC signals
+    socketRef.current.on('webrtc-offer', ({peerId, signal }) => {
+        peerManager.handleSignal(peerId, signal);
+    });
+
+    socketRef.current.on('webrtc-answer', ({peerId, signal }) => {
+        peerManager.handleSignal(peerId, signal);
+    });
+
+    socketRef.current.on('webrtc-ice-candidate', ({peerId, signal }) => {
+        peerManager.handleSignal(peerId, signal);
     });
 
     socketRef.current.on('typing', ({ userName }) => {
@@ -294,6 +359,13 @@ useEffect(() => {
                 duration: 3000,
             });
         }
+
+        participants.forEach((p: Participant) => {
+    const audioEl = document.getElementById(`audio-${p.id}`) as HTMLAudioElement | null;
+    if (audioEl) {
+      audioEl.muted = p.isAudioMuted;
+    }
+  });
     } else {
         console.error('❌ ERROR: participants is undefined!');
     }
@@ -311,6 +383,20 @@ useEffect(() => {
         }
     });
 
+    socketRef.current.on('avatars-updated', ({ avatars }: { avatars: any[] }) => {
+        console.log('🧑‍🤝‍🧑 Received avatars-updated. Avatars:', avatars);
+        setAvatars(avatars);
+
+        //update spatial audio sources for each avatar
+        if(isMetaverseMode) {
+            avatars.forEach(avatar => {
+                if(avatar.id !== user?.id) {
+                    spatialAudioManager.updatePeerPosition(avatar.id, avatar.position);
+                }
+            });
+        }
+    });
+
     socketRef.current.on('force-disconnect', () => {
             toast.error('You have been removed from the classroom by the instructor.',{
         icon: '🚫',
@@ -325,11 +411,202 @@ useEffect(() => {
 
     // Cleanup on unmount
     return () => {
-        if (socketRef.current) {
-            socketRef.current.disconnect();
-        }
+        // if (socketRef.current) {
+        //     socketRef.current.disconnect();
+        // }
+         createdPeersRef.current.clear();
+            peerManager.cleanup();
+            spatialAudioManager.cleanup();
+            document
+  .querySelectorAll('audio[id^="audio-"]')
+  .forEach(el => el.remove());
+
+            socketRef.current?.disconnect();
     };
 }, [classroomId, user?.name]);
+
+// // Initialize spatial audio when entering metaverse mode
+useEffect(() => {
+  if (isMetaverseMode) {
+    // Initialize AudioContext (requires user interaction)
+    spatialAudioManager.initialize();
+    
+    console.log('🎧 Spatial audio enabled for metaverse mode');
+  }
+  
+  return () => {
+    // Cleanup when leaving metaverse mode
+    if (!isMetaverseMode) {
+      spatialAudioManager.cleanup();
+    }
+  };
+}, [isMetaverseMode]);
+
+// Initialize spatial audio and resume AudioContext on user interaction
+useEffect(() => {
+    spatialAudioManager.initialize();
+    console.log('🎧 Spatial audio initialized on mount');
+    
+    // Resume AudioContext on first click (browser autoplay policy)
+    const resumeAudio = async () => {
+        if (spatialAudioManager['audioContext']) {
+            await spatialAudioManager['audioContext'].resume();
+            console.log('✅ AudioContext resumed');
+        }
+    };
+    
+    // Add click listener to resume audio
+    document.addEventListener('click', resumeAudio, { once: true });
+    
+    return () => {
+        document.removeEventListener('click', resumeAudio);
+    };
+}, []);
+
+
+// Initialize WebRTC and local media
+useEffect(() => {
+    const initWebRTC = async () => {
+        try {
+            // Set up peer event callbacks FIRST (before getting media stream)
+            // This ensures callbacks are ready if we receive offers early
+            peerManager.setCallbacks({
+                // When SimplePeer generates signal (offer/answer/ICE), send via Socket.io
+                onSignal: (peerId, signal) => {
+                    if (!socketRef.current) return;
+
+                    // Determine signal type and emit appropriate event
+                    if (signal.type === 'offer') {
+                        socketRef.current.emit('webrtc-offer', {
+                            classroomId: classroomId,
+                            targetPeerId: peerId,
+                            signal: signal
+                        });
+                    } else if (signal.type === 'answer') {
+                        socketRef.current.emit('webrtc-answer', {
+                            classroomId: classroomId,
+                            targetPeerId: peerId,
+                            signal: signal
+                        });
+                    } else {
+                        // ICE candidate
+                        socketRef.current.emit('webrtc-ice-candidate', {
+                            classroomId: classroomId,
+                            targetPeerId: peerId,
+                            signal: signal
+                        });
+                    }
+                },
+
+                // When remote stream arrives, connect to spatial audio
+                onStream: (peerId, stream) => {
+                    // Store remote stream for video display
+                    setRemoteStreams(prev => {
+                        const newStreams = { ...prev, [peerId]: stream };
+                        return newStreams;
+                    });
+                    
+                    // SIMPLE FIX: Create audio element to play remote stream
+                    // This bypasses Web Audio API issues with muted tracks
+                    const audioElement = document.createElement('audio');
+                    audioElement.srcObject = stream;
+                    audioElement.autoplay = true;
+                    audioElement.volume = 1.0;
+                    audioElement.id = `remote-audio-${peerId}`;
+                    document.body.appendChild(audioElement);
+                    audioElement.play().catch(() => {});
+                    
+                    // Also add to spatial audio for future 3D support
+                    const avatar = avatars.find(a => a.id === peerId);
+                    const initialPosition = avatar?.position || { x: 0, y: 1.6, z: 0 };
+                    spatialAudioManager.addPeerAudio(peerId, stream, initialPosition);
+                },
+
+                onError: (peerId, error) => {
+                    console.error(`❌ Peer error with ${peerId}:`, error);
+                    toast.error(`Connection error with ${peerId}`);
+                },
+
+                onClose: (peerId) => {
+                    console.log(`🔌 Peer ${peerId} disconnected`);
+                    
+                    // Remove remote stream
+                    setRemoteStreams(prev => {
+                        const newStreams = { ...prev };
+                        delete newStreams[peerId];
+                        console.log(`🗑️ Removed stream for ${peerId}, remaining:`, Object.keys(newStreams).length);
+                        return newStreams;
+                    });
+
+                    document.getElementById(`audio-${peerId}`)?.remove();
+
+                    // Remove audio element
+                    const audioElement = document.getElementById(`remote-audio-${peerId}`);
+                    if (audioElement) {
+                        audioElement.remove();
+                        console.log(`🗑️ Removed audio element for ${peerId}`);
+                    }
+                    
+                    spatialAudioManager.removePeerAudio(peerId);
+                }
+            });
+
+            // Get camera/mic permission AFTER setting callbacks
+            console.log('📹 Requesting camera/mic access...');
+            const stream = await peerManager.initializeLocalStream(!isVideoOff, !isMuted);
+            console.log('✅ Got local stream:', stream.id);
+            console.log('📹 Video tracks:', stream.getVideoTracks().length);
+            console.log('🎤 Audio tracks:', stream.getAudioTracks().length);
+            setLocalStream(stream);
+            localStreamReadyRef.current = true;
+
+            // NOW join the classroom after media is ready
+            if (socketRef.current) {
+                socketRef.current.emit('join-classroom', {
+                    classroomId: classroomId,
+                    userName: user?.name || 'Guest',
+                    role: user?.userType === 'teacher' ? 'instructor' : 'student'
+                });
+                console.log('📡 Joined classroom after media ready');
+            }
+
+            console.log('✅ WebRTC initialized');
+        } catch (error) {
+            console.error('❌ Failed to initialize WebRTC:', error);
+            toast.error('Could not access camera/microphone');
+        }
+    };
+
+    // Only initialize WebRTC after socket is connected
+    if (mySocketId) {
+        initWebRTC();
+    }
+
+    return () => {
+        if (mySocketId) {
+            peerManager.cleanup();
+        }
+    };
+}, [mySocketId]); // Run when socket ID is available
+
+// Attach local stream to video element when both are ready
+useEffect(() => {
+    if (localStream && selfVideoRef.current) {
+        selfVideoRef.current.srcObject = localStream;
+        selfVideoRef.current.play().catch(() => {});
+    }
+}, [localStream, isVideoOff, isMetaverseMode]); // Re-attach when stream, video state, or view changes
+
+useEffect(() => {
+  Object.entries(remoteStreams).forEach(([peerId, stream]) => {
+    const videoEl = remoteVideoRefs.current[peerId];
+    if (videoEl && videoEl.srcObject !== stream) {
+      videoEl.srcObject = stream;
+      videoEl.play().catch(() => {});
+    }
+  });
+}, [remoteStreams]);
+
 
   const formatDuration = (seconds: number) => {
         const hrs = Math.floor(seconds / 3600);
@@ -366,39 +643,99 @@ useEffect(() => {
 
             <div className="flex-1 flex overflow-hidden">
                 {/* Main Video Area */}
-                <div className="flex-1 p-4 overflow-y-auto">
+               <div className="flex-1 p-4 overflow-y-auto">
+    {isMetaverseMode ? (
+        <MetaverseScene 
+            avatars={avatars}
+            currentUserId={user?.id || ''}
+            onPositionUpdate={handlePositionUpdate}
+        />
+    ) : (
+        <>
                    {/* Instructor Video (Large) */}
-{participants.filter(p => p.role === 'instructor').map((instructor) => (
-    <div key={instructor.id} className="bg-gray-800 rounded-lg mb-4 aspect-video flex items-center justify-center relative">
-        <div className="text-center">
-            <Video className="w-16 h-16 text-gray-500 mx-auto mb-2" />
-            <p className="text-white text-xl">{instructor.name}</p>
-            <p className="text-gray-400 text-sm">Instructor</p>
-            <div className="mt-2 flex gap-2 justify-center">
-                {instructor.isAudioMuted ? (
-                    <MicOff className="w-5 h-5 text-red-500" />
-                ) : (
-                    <Mic className="w-5 h-5 text-green-500" />
-                )}
-                {instructor.isVideoOff ? (
-                    <VideoOff className="w-5 h-5 text-red-500" />
-                ) : (
-                    <Video className="w-5 h-5 text-green-500" />
-                )}
+{participants.filter(p => p.role === 'instructor').map((instructor) => {
+    const isCurrentUser = instructor.id === mySocketId; // ✅ Compare socket IDs
+    const remoteStream = remoteStreams[instructor.id];
+    const hasVideo = isCurrentUser ? (localStream && !isVideoOff) : !!remoteStream;
+    
+    return (
+    <div key={instructor.id} className="bg-gray-800 rounded-lg mb-4 aspect-video flex items-center justify-center relative overflow-hidden">
+        {/* Show video for current user OR remote instructor */}
+        {hasVideo ? (
+            isCurrentUser ? (
+                <video 
+                    ref={(el) => {
+                        if (el && localStream && el.srcObject !== localStream) {
+                            el.srcObject = localStream;
+                        }
+                    }}
+                    autoPlay 
+                    muted 
+                    playsInline
+                    className="w-full h-full object-cover transform scale-x-[-1]"
+                />
+            ) : (
+                <video
+                    autoPlay
+                    playsInline
+                    ref={(el) => {
+                        if (el && remoteStream && el.srcObject !== remoteStream) {
+                            el.srcObject = remoteStream;
+                            remoteVideoRefs.current[instructor.id] = el;
+                        }
+                    }}
+                    className="w-full h-full object-cover"
+                />
+            )
+        ) : (
+            <div className="text-center">
+                <Video className="w-16 h-16 text-gray-500 mx-auto mb-2" />
+                <p className="text-white text-xl">{instructor.name}</p>
+                <p className="text-gray-400 text-sm">Instructor</p>
             </div>
+        )}
+        
+        {/* Status indicators overlay */}
+        <div className="absolute bottom-2 left-2 flex gap-2">
+            {instructor.isAudioMuted ? (
+                <div className="bg-red-600 rounded-full p-1.5">
+                    <MicOff className="w-4 h-4 text-white" />
+                </div>
+            ) : (
+                <div className="bg-green-600 rounded-full p-1.5">
+                    <Mic className="w-4 h-4 text-white" />
+                </div>
+            )}
+            {instructor.isVideoOff ? (
+                <div className="bg-red-600 rounded-full p-1.5">
+                    <VideoOff className="w-4 h-4 text-white" />
+                </div>
+            ) : (
+                <div className="bg-green-600 rounded-full p-1.5">
+                    <Video className="w-4 h-4 text-white" />
+                </div>
+            )}
         </div>
+        
+        {/* "You" label */}
+        {isCurrentUser && (
+            <div className="absolute top-2 left-2 bg-blue-600 px-2 py-1 rounded text-xs text-white font-semibold">
+                You
+            </div>
+        )}
+        
         {instructor.hasRaisedHand && (
             <div className="absolute top-2 right-2 bg-yellow-500 rounded-full p-2">
                 <Hand className="w-6 h-6 text-white" />
             </div>
         )}
         {instructor.isScreenSharing && (
-            <div className="absolute top-2 left-2 bg-green-500 rounded-full p-2">
+            <div className="absolute bottom-2 right-2 bg-green-500 rounded-full p-2">
                 <Monitor className="w-5 h-5 text-white" />
             </div>
         )}
     </div>
-))}
+)})}
 
 {/* If no instructor, show placeholder */}
 {participants.filter(p => p.role === 'instructor').length === 0 && (
@@ -414,33 +751,84 @@ useEffect(() => {
                     {/* Student Videos Grid */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                         {participants.filter(p => p.role === 'student').map((participant) => {
-                            console.log('🎥 Rendering participant:', participant.name, 'isScreenSharing:', participant.isScreenSharing);
+                            const isCurrentUser = participant.id === mySocketId;
+                            const remoteStream = remoteStreams[participant.id];
+                            const hasVideo = isCurrentUser ? (localStream && !isVideoOff) : !!remoteStream;
+                            
                             return (
                             <div 
                                 key={participant.id} 
                                 onClick={() => setSelectedParticipant(participant.id)}
-                                className={`bg-gray-800 rounded-lg aspect-video flex items-center justify-center relative cursor-pointer transition-all hover:ring-2 hover:ring-blue-500 ${
+                                className={`bg-gray-800 rounded-lg aspect-video flex items-center justify-center relative cursor-pointer transition-all hover:ring-2 hover:ring-blue-500 overflow-hidden ${
                                     selectedParticipant === participant.id ? 'ring-2 ring-blue-500' : ''
                                 }`}
                             >
-                                <div className="text-center">
-                                    <Video className="w-8 h-8 text-gray-500 mx-auto" />
-                                    <p className="text-white text-sm mt-1">{participant.name}</p>
-                                     <div className="mt-1 flex gap-1 justify-center">
-                                    {participant.isAudioMuted ? (
-                                        <MicOff className="w-4 h-4 text-red-500" />
+                                {/* Show video for current user OR remote participants */}
+                                {hasVideo ? (
+                                    isCurrentUser ? (
+                                        <video 
+                                            key={`local-video-${isVideoOff}`}
+                                            ref={(el) => {
+                                                if (el && localStream && el.srcObject !== localStream) {
+                                                    el.srcObject = localStream;
+                                                }
+                                            }}
+                                            autoPlay 
+                                            muted 
+                                            playsInline
+                                            className="w-full h-full object-cover transform scale-x-[-1]"
+                                        />
                                     ) : (
-                                        <Mic className="w-4 h-4 text-green-500" />
+                                        <video
+                                            autoPlay
+                                            playsInline
+                                            ref={(el) => {
+                                                if (el && remoteStream && el.srcObject !== remoteStream) {
+                                                    el.srcObject = remoteStream;
+                                                    remoteVideoRefs.current[participant.id] = el;
+                                                }
+                                            }}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    )
+                                ) : (
+                                    <div className="text-center">
+                                        <Video className="w-8 h-8 text-gray-500 mx-auto" />
+                                        <p className="text-white text-sm mt-1">{participant.name}</p>
+                                    </div>
+                                )}
+                                
+                                {/* Status indicators overlay */}
+                                <div className="absolute bottom-1 left-1 flex gap-1">
+                                    {participant.isAudioMuted ? (
+                                        <div className="bg-red-600 rounded-full p-1">
+                                            <MicOff className="w-3 h-3 text-white" />
+                                        </div>
+                                    ) : (
+                                        <div className="bg-green-600 rounded-full p-1">
+                                            <Mic className="w-3 h-3 text-white" />
+                                        </div>
                                     )}
                                     {participant.isVideoOff ? (
-                                        <VideoOff className="w-4 h-4 text-red-500" />
+                                        <div className="bg-red-600 rounded-full p-1">
+                                            <VideoOff className="w-3 h-3 text-white" />
+                                        </div>
                                     ) : (
-                                        <Video className="w-4 h-4 text-green-500" />
+                                        <div className="bg-green-600 rounded-full p-1">
+                                            <Video className="w-3 h-3 text-white" />
+                                        </div>
                                     )}
-                                 </div>
                                 </div>
+                                
+                                {/* "You" label */}
+                                {isCurrentUser && (
+                                    <div className="absolute top-1 left-1 bg-blue-600 px-1.5 py-0.5 rounded text-xs text-white font-semibold">
+                                        You
+                                    </div>
+                                )}
+                                
                                 {participant.hasRaisedHand && (
-                                    <div className="absolute top-2 right-2 bg-yellow-500 rounded-full p-1 animate-bounce">
+                                    <div className="absolute top-1 right-1 bg-yellow-500 rounded-full p-1 animate-bounce">
                                         <Hand className="w-4 h-4 text-white" />
                                     </div>
                                 )}
@@ -453,6 +841,8 @@ useEffect(() => {
                             );
                         })}
                     </div>
+                    </>)}
+        
                 </div>
 
                 {/* Right Sidebar - Chat */}
@@ -637,6 +1027,24 @@ useEffect(() => {
                 >
                     {isVideoOff ? <VideoOff className="w-6 h-6 text-white" /> : <Video className="w-6 h-6 text-white" />}
                 </button>
+
+                                    {/* Toggle 3D Metaverse View */}
+                    <button 
+                        onClick={toggleMetaverseMode}
+                        className={`p-4 rounded-full ${
+                            isMetaverseMode 
+                                ? 'bg-purple-600 hover:bg-purple-700' 
+                                : 'bg-gray-600 hover:bg-gray-700'
+                        }`}
+                        title={isMetaverseMode ? "Switch to Video View" : "Switch to 3D Metaverse"}
+                    >
+                        {isMetaverseMode ? (
+                            <Video className="w-6 h-6 text-white" />
+                        ) : (
+                            <Monitor className="w-6 h-6 text-white" />
+                        )}
+                    </button>
+                
 
                 <button onClick={handleScreenShare}  
     className={`p-4 rounded-full ${isScreenSharing ? 'bg-green-500' : 'bg-gray-700'} hover:bg-gray-600`}

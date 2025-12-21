@@ -16,6 +16,7 @@ const io = new Server(server, {
 
 // Store active classrooms and participants
 const classrooms = new Map();
+const avatarPositions = new Map(); // Map<classroomId, Map<socketId, {position, rotation}>>
 
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
@@ -28,6 +29,8 @@ io.on('connection', (socket) => {
         if (!classrooms.has(classroomId)) {
             classrooms.set(classroomId, new Map());
         }
+
+
         
         const classroom = classrooms.get(classroomId);
         classroom.set(socket.id, {
@@ -47,6 +50,18 @@ io.on('connection', (socket) => {
             participants: Array.from(classroom.values())
         });
 
+            //         // 1️⃣ Send existing participants ONLY to the new user
+            // socket.emit('participants-list', {
+            //     participants: Array.from(classroom.values())
+            // });
+
+            // // 2️⃣ Notify others that a new user joined
+            // socket.to(classroomId).emit('user-joined', {
+            //     userId: socket.id,
+            //     userName: userName
+            // });
+
+
         console.log(`${userName} joined classroom ${classroomId}`);
     });
 
@@ -61,6 +76,64 @@ io.on('connection', (socket) => {
         };
         
         io.to(classroomId).emit('receive-message', chatMessage);
+    });
+
+    socket.on('avatar-move', ({classroomId, position, rotation}) => {
+        const classroom = classrooms.get(classroomId);
+        if (!classrooms.has(classroomId)) return;
+
+        if(classroom){
+            //store avatar position
+            if(!avatarPositions.has(classroomId)){
+                avatarPositions.set(classroomId,new Map());
+            }
+            const classroomAvatars = avatarPositions.get(classroomId);
+            classroomAvatars.set(socket.id,{position,rotation});
+
+            //build avatar data with participant info
+            const avatarsData = [];
+            classroomAvatars.forEach((avatarData,socketId)=>{
+                const participant = classroom.get(socketId);
+                if(participant){
+                    avatarsData.push({
+                        id: participant.id,
+                        name: participant.name,
+                        position: avatarData.position,
+                        rotation: avatarData.rotation
+                    });
+                }
+            });
+            //broadcast to others
+            io.to(classroomId).emit('avatars-updated',{
+                avatars:avatarsData
+            });
+        }
+    });
+
+    // WebRTC Signaling - Relay offer/answer/ICE candidates between peers
+    // CONCEPT: Server doesn't handle media, just coordinates peer connection setup
+    socket.on('webrtc-offer',({classroomId,targetPeerId,signal})=>{
+        console.log(`Relaying WebRTC offer from ${socket.id} to ${targetPeerId}`);
+        io.to(targetPeerId).emit('webrtc-offer',{
+            peerId: socket.id,
+            signal: signal
+        });
+    });
+
+    socket.on('webrtc-answer',({classroomId,targetPeerId,signal})=>{
+        console.log(`Relaying WebRTC answer from ${socket.id} to ${targetPeerId}`);
+        io.to(targetPeerId).emit('webrtc-answer',{
+            peerId: socket.id,
+            signal: signal
+        });
+    });
+
+    socket.on('webrtc-ice-candidate',({classroomId,targetPeerId,signal})=>{
+        console.log(`Relaying ICE candidate from ${socket.id} to ${targetPeerId}`);
+        io.to(targetPeerId).emit('webrtc-ice-candidate',{
+            peerId: socket.id,
+            signal: signal
+        });
     });
 
     // Raise hand
@@ -216,12 +289,21 @@ io.on('connection', (socket) => {
     // Disconnect
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
+
+       
         
         // Remove from all classrooms
         classrooms.forEach((classroom, classroomId) => {
             if (classroom.has(socket.id)) {
                 const participant = classroom.get(socket.id);
                 classroom.delete(socket.id);
+
+                 //cleanup avatar positions
+        avatarPositions.forEach((classroomAvatars, classroomId) => {
+            if(classroomAvatars.has(socket.id)){
+                classroomAvatars.delete(socket.id);
+            }
+        });
                 
                 io.to(classroomId).emit('user-left', {
                     userId: socket.id,
