@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const { create } = require('domain');
 
 const app = express();
 app.use(cors());
@@ -17,6 +18,9 @@ const io = new Server(server, {
 // Store active classrooms and participants
 const classrooms = new Map();
 const avatarPositions = new Map(); // Map<classroomId, Map<socketId, {position, rotation}>>
+const breakoutSessions = new Map(); // Map<sessionId, Map<socketId, participantData>>
+const classroomPolls = new Map(); // Map<classroomId, Array of polls>
+const pollResponses = new Map(); // Map<pollId, Map<userId, response>>
 
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
@@ -50,17 +54,12 @@ io.on('connection', (socket) => {
             participants: Array.from(classroom.values())
         });
 
-            //         // 1️⃣ Send existing participants ONLY to the new user
-            // socket.emit('participants-list', {
-            //     participants: Array.from(classroom.values())
-            // });
-
-            // // 2️⃣ Notify others that a new user joined
-            // socket.to(classroomId).emit('user-joined', {
-            //     userId: socket.id,
-            //     userName: userName
-            // });
-
+        // SEND EXISTING POLLS TO NEW JOINER
+        const existingPolls = getPollsForClassroom(classroomId);
+        if (existingPolls.length > 0) {
+            socket.emit('existing-polls', existingPolls);
+            console.log(`📊 Sent ${existingPolls.length} existing polls to ${userName}`);
+        }
 
         console.log(`${userName} joined classroom ${classroomId}`);
     });
@@ -285,6 +284,312 @@ io.on('connection', (socket) => {
         
         console.log(`Screen sharing ${isSharing ? 'started' : 'stopped'} by ${socket.id}`);
     });
+
+    socket.on('create-breakout-rooms',({classroomId,session})=>{
+        console.log(`📝 Creating breakout rooms in ${classroomId}`);
+        breakoutSessions.set(classroomId, session);  // Store full session object
+        io.to(classroomId).emit('breakout-rooms-created',{
+            session
+        });
+         console.log(`✅ Created ${session.rooms.length} rooms`);
+    });
+
+    socket.on('join-breakout-room',({classroomId, roomId, userId})=>{
+        console.log(`➡️ User ${userId} joining breakout room ${roomId} in classroom ${classroomId}`);
+        const session = breakoutSessions.get(classroomId);
+        if(!session){
+            console.log('❌ ERROR: No breakout session found!');
+            return;
+        }
+        const room = session.rooms.find(r=>r.id===roomId);
+        if(!room){
+            console.log('❌ ERROR: No such breakout room found!');
+            return;
+        }
+        
+        console.log(`📋 Room ${roomId} participants BEFORE join:`, room.participants);
+        
+        if(!room.participants.includes(userId)){
+            room.participants.push(userId);
+        }
+        
+        console.log(`📋 Room ${roomId} participants AFTER join:`, room.participants);
+        
+        socket.leave(classroomId);
+        socket.join(roomId);
+        
+        const peerIds = room.participants.filter(id=>id!==userId);
+        console.log(`📨 Sending room-peers-list to ${userId} with peerIds:`, peerIds);
+        
+        socket.emit('room-peers-list',{
+            peerIds,
+            roomId
+        });
+        
+        console.log(`📢 Broadcasting user-joined-room to room ${roomId} (except ${userId})`);
+        socket.to(roomId).emit('user-joined-room',{
+            userId,
+            roomId
+        });
+        
+       breakoutSessions.set(classroomId,session);
+       
+       // Broadcast updated session to ALL users in the classroom
+       io.to(classroomId).emit('breakout-session-updated', { session });
+       
+        console.log(`✅ User ${userId} joined breakout room ${roomId}`);
+    });
+
+    socket.on('leave-breakout-room',({classroomId, roomId, userId})=>{
+        console.log(`⬅️ User ${userId} leaving breakout room ${roomId} in classroom ${classroomId}`);
+        const session = breakoutSessions.get(classroomId);
+        if(!session){
+            console.log('❌ ERROR: No breakout session found!');
+            return;
+        }
+        const room = session.rooms.find(r=>r.id===roomId);
+        if(room){
+            room.participants = room.participants.filter(id=>id!==userId);
+            socket.leave(room.id);
+            socket.to(room.id).emit('user-left-room',{
+                userId,
+                roomId: room.id
+            });
+        }
+        socket.join(classroomId);
+        breakoutSessions.set(classroomId,session);
+        
+        // Broadcast updated session to ALL users in the classroom
+        io.to(classroomId).emit('breakout-session-updated', { session });
+        
+        console.log(`✅ User ${userId} left breakout room ${roomId}`);
+    });
+
+    socket.on('close-breakout-rooms',({classroomId})=>{
+        console.log(`🔒 Closing breakout rooms in classroom ${classroomId}`);
+        const session = breakoutSessions.get(classroomId);
+        if(!session){
+            console.log('❌ ERROR: No breakout session found!');
+            return;
+        }
+        session.rooms.forEach(room=>{
+            room.participants.forEach(userId=>{
+                const participantSocket = Array.from(io.sockets.sockets.values()).find(s=>s.id===userId);
+                if(participantSocket){
+                    participantSocket.leave(room.id);
+                    participantSocket.join(classroomId);
+                }
+            });
+        });
+        breakoutSessions.delete(classroomId);
+        
+        // Notify everyone that rooms are closed
+        io.to(classroomId).emit('breakout-rooms-closed');
+        
+        // Get all participants back in main classroom
+        const classroom = classrooms.get(classroomId);
+        if(classroom) {
+            const participantsList = Array.from(classroom.values());
+            // Tell each user who else is back in the main room
+            participantsList.forEach(participant => {
+                io.to(participant.id).emit('main-room-participants', {
+                    participants: participantsList.filter(p => p.id !== participant.id).map(p => p.id)
+                });
+            });
+        }
+        
+        console.log(`✅ Closed breakout rooms in classroom ${classroomId}`);
+    });
+
+    socket.on('braodcast-to-breakout-room',({classroomId, roomId, message})=>{
+        const session = breakoutSessions.get(classroomId);
+        if(!session){
+            console.log('❌ ERROR: No breakout session found!');
+            return;
+        }
+        session.rooms.forEach(room=>{
+            if(room.id===roomId){
+                room.participants.forEach(userId=>{
+                    io.to(userId).emit('breakout-room-message',{
+                        roomId,
+                        message
+                    });
+                });
+            }
+        });
+    });
+
+    // ============================================
+// POLL EVENTS
+// ============================================
+socket.on('create-poll', (pollData) => {
+    console.log('📊 Creating poll:', pollData);
+    
+    // 1. Generate unique poll ID
+    const pollId = `poll-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // 2. Build complete poll object
+    const poll = {
+        id: pollId,
+        ...pollData,
+        createdAt: Date.now() // Server timestamp
+    };
+    
+    // 3. Store in memory
+    const classroomId = pollData.classroomId;
+    const existingPolls = classroomPolls.get(classroomId) || [];
+    existingPolls.push(poll);
+    classroomPolls.set(classroomId, existingPolls);
+    
+    // 4. Initialize empty responses array for this poll
+    pollResponses.set(pollId, []);
+    
+    // 5. Broadcast to entire classroom
+    io.to(classroomId).emit('poll-created', poll);
+    
+    console.log(`✅ Poll ${pollId} created and broadcast to ${classroomId}`);
+});
+
+socket.on('submit-poll-response', (responseData) => {
+    console.log('🗳️ Received vote:', responseData);
+    
+    const { pollId, userId, userName, selectedOptionIds, timestamp } = responseData;
+    
+    // 1. CHECK FOR DUPLICATE VOTE (CRITICAL!)
+    const existingResponses = pollResponses.get(pollId) || [];
+    const hasAlreadyVoted = existingResponses.some(r => r.userId === userId);
+    
+    if (hasAlreadyVoted) {
+        console.log(`❌ User ${userId} already voted on poll ${pollId}`);
+        socket.emit('vote-error', { message: 'You have already voted on this poll' });
+        return;
+    }
+    
+    // 2. STORE RESPONSE
+    const response = {
+        pollId,
+        userId,
+        userName,
+        selectedOptionIds,
+        timestamp: Date.now() // Server timestamp
+    };
+    existingResponses.push(response);
+    pollResponses.set(pollId, existingResponses);
+    
+    // 3. FIND CLASSROOM AND UPDATE POLL VOTE COUNTS
+    const classroomId = findClassroomByPollId(pollId);
+    if (!classroomId) {
+        console.log('❌ Classroom not found for poll');
+        return;
+    }
+    
+    const polls = classroomPolls.get(classroomId) || [];
+    const poll = polls.find(p => p.id === pollId);
+    
+    if (poll) {
+        // Increment voteCount for each selected option
+        selectedOptionIds.forEach(optionId => {
+            const option = poll.options.find(opt => opt.id === optionId);
+            if (option) {
+                option.voteCount = (option.voteCount || 0) + 1;
+            }
+        });
+        
+        // Update poll in storage
+        classroomPolls.set(classroomId, polls);
+        
+        // 4. BROADCAST UPDATED POLL
+        io.to(classroomId).emit('poll-updated', poll);
+        
+        console.log(`✅ Vote recorded. Poll ${pollId} now has ${existingResponses.length} responses`);
+    }
+});
+
+socket.on('close-poll', ({ pollId }) => {
+    console.log('🔒 Closing poll:', pollId);
+    
+    // 1. FIND THE POLL
+    const classroomId = findClassroomByPollId(pollId);
+    if (!classroomId) {
+        console.log('❌ Poll not found');
+        return;
+    }
+    
+    const polls = classroomPolls.get(classroomId) || [];
+    const poll = polls.find(p => p.id === pollId);
+    
+    if (!poll) {
+        console.log('❌ Poll not found in classroom');
+        return;
+    }
+    
+    // 2. MARK AS INACTIVE
+    poll.isActive = false;
+    classroomPolls.set(classroomId, polls);
+    
+    // 3. CALCULATE RESULTS
+    const responses = pollResponses.get(pollId) || [];
+    const totalResponses = responses.length;
+    
+    const results = {
+        pollId,
+        totalResponses,
+        optionResults: poll.options.map(option => ({
+            optionId: option.id,
+            text: option.text,
+            voteCount: option.voteCount || 0,
+            percentage: totalResponses > 0 
+                ? Math.round((option.voteCount || 0) / totalResponses * 100) 
+                : 0
+        })),
+        respondedUserIds: responses.map(r => r.userId)
+    };
+    
+    // 4. BROADCAST CLOSURE
+    io.to(classroomId).emit('poll-closed', { poll, results });
+    
+    console.log(`✅ Poll ${pollId} closed with ${totalResponses} responses`);
+});
+
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
+
+/**
+ * Find which classroom a poll belongs to
+ * @param {string} pollId 
+ * @returns {string|null} classroomId or null if not found
+ */
+function findClassroomByPollId(pollId) {
+  for (const [classroomId, polls] of classroomPolls.entries()) {
+    if (polls.some(poll => poll.id === pollId)) {
+      return classroomId;
+    }
+  }
+  return null;
+}
+
+/**
+ * Get all polls for a classroom
+ * @param {string} classroomId 
+ * @returns {Array} Array of polls
+ */
+function getPollsForClassroom(classroomId) {
+  return classroomPolls.get(classroomId) || [];
+}
+
+/**
+ * Check if user has voted on a poll
+ * @param {string} pollId 
+ * @param {string} userId 
+ * @returns {boolean}
+ */
+function hasUserVoted(pollId, userId) {
+  const responses = pollResponses.get(pollId) || [];
+  return responses.some(r => r.userId === userId);
+}
+
+
 
     // Disconnect
     socket.on('disconnect', () => {

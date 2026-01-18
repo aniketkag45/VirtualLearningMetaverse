@@ -17,6 +17,9 @@ class PeerManager {
   private peers: Map<string, PeerConnection> = new Map();
   private localStream: MediaStream | null = null;
   private callbacks: PeerManagerCallbacks | null = null;
+  private originalCameraTrack: MediaStreamTrack | null = null;
+  private isSharingScreen: boolean = false;
+ private screenTrack: MediaStreamTrack | null = null;
 
   // STUN servers for NAT traversal
   private iceServers = {
@@ -229,6 +232,76 @@ if (sender) {
   }
 }
 
+async startScreenShare() : Promise<MediaStream | null> {
+  try{
+    const screenStream = await navigator.mediaDevices.getDisplayMedia({
+      video:true,
+      audio: false
+    });
+
+    const screenTrack = screenStream.getVideoTracks()[0];
+    this.screenTrack = screenTrack;
+
+    // Store original camera track
+    this.originalCameraTrack = this.localStream?.getVideoTracks()[0] || null;
+
+    // Replace video track in local stream
+    this.peers.forEach((peerConnection, peerId) => {
+      this.replaceVideoTrack(peerId, screenTrack);
+    });
+
+    screenTrack.onended = () => {
+      this.stopScreenShare();
+    };
+
+    this.isSharingScreen = true;
+    return screenStream;
+  } catch (error) {
+   // console.error('❌ Failed to start screen share:', error);
+    return null;
+  }
+      }
+  
+      stopScreenShare() : void {
+    if (!this.isSharingScreen || !this.originalCameraTrack) return;
+
+    // Replace screen track with original camera track
+    this.peers.forEach((peerConnection, peerId) => {
+      this.replaceVideoTrack(peerId, this.originalCameraTrack!);
+    });
+    this.isSharingScreen = false;
+    this.originalCameraTrack = null;
+    this.screenTrack = null;
+
+      }
+
+    sendCurrentVideoToNewPeer(peerId: string) : void {
+    if (this.isSharingScreen && this.screenTrack) {
+      const screenTrack = this.screenTrack;
+      if (screenTrack) {
+        this.replaceVideoTrack(peerId, this.screenTrack);
+      } else if (this.originalCameraTrack) {
+        this.replaceVideoTrack(peerId, this.originalCameraTrack);
+      }
+    } else if (this.originalCameraTrack) {
+      this.replaceVideoTrack(peerId, this.originalCameraTrack);
+    }
+  }
+
+      private async replaceVideoTrack(peerId: string, newTrack: MediaStreamTrack) : Promise<void> {
+        const peerData = this.peers.get(peerId);
+        if (!peerData) return;
+
+        const { pc } = peerData;
+
+        const videoSender = pc.getSenders().find(s => s.track?.kind === 'video');
+        if (videoSender) {
+          await videoSender.replaceTrack(newTrack);
+         // console.log(`🔄 Replaced video track for peer ${peerId}`);
+        }
+      }
+  
+
   destroyPeer(peerId: string) {
     const peerData = this.peers.get(peerId);
     if (peerData) {
@@ -273,6 +346,15 @@ if (sender) {
     }
 
    // console.log('🧹 PeerManager cleaned up');
+  }
+
+  // Cleanup only peer connections, keep local stream alive (for breakout rooms)
+  cleanupPeersOnly() {
+    console.log('🧹 Cleaning up peer connections only, keeping local stream...');
+    this.peers.forEach((_peerData, peerId) => {
+      this.destroyPeer(peerId);
+    });
+    // Don't stop local stream - we need it for the breakout room!
   }
 }
 

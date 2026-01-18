@@ -9,6 +9,23 @@ import toast, { Toaster } from 'react-hot-toast';
 import MetaverseScene from '../components/metaverse/MetaverseScene';
 import { spatialAudioManager } from '../utils/spatialAudio';
 import { peerManager } from '../utils/peerManager';
+import { useAudioAnalyzer } from '../hooks/useAudioAnalyzer';
+
+import { BreakoutSession, BreakoutRoom, RoomAssignment } from '../types/breakoutRooms';
+import { BreakoutControlPanel } from '../components/breakout/BreakoutControlPanel';
+import { BreakoutRoomJoinModal } from '../components/breakout/BreakoutRoomJoinModal';
+import { RoomTimer } from '../components/breakout/RoomTimer';
+import { useBreakoutTimer } from '../hooks/useBreakoutTimer';
+import {
+  autoAssignStudents,
+  generateRooms,
+  getParticipantsInRoom,
+  canCreateBreakoutRooms
+} from '../utils/breakoutHelpers';
+import { Poll, PollResults,PollResponse } from '../types/polls';
+import CreatePollModal from '../components/polls/CreatePollModal';
+import PollVoteCard from '../components/polls/PollVoteCard';
+import PollResultsView from '../components/polls/PollResultsView';
 
 const playSound = (soundType: 'join' | 'leave' | 'message'|'notification') => {
     const frequencies : { [key: string]: number } = {
@@ -52,9 +69,10 @@ const ClassroomPage = () => {
     const [hasRaisedHand, setHasRaisedHand] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [messageInput, setMessageInput] = useState('');
-    const [activeTab, setActiveTab] = useState<'chat' | 'participants'>('chat');
+    const [activeTab, setActiveTab] = useState<'chat' | 'participants' | 'breakout' | 'polls'>('chat');
     const [selectedParticipant, setSelectedParticipant] = useState<string | null>(null);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
+    const [screenSharingUserId, setScreenSharingUserId] = useState<string | null>(null);
     const [sessionDuration, setSessionDuration] = useState(0);
      const [participants, setParticipants] = useState<Participant[]>([]);
     const [typingUsers, setTypingUsers] = useState<string[]>([]);
@@ -67,6 +85,94 @@ const ClassroomPage = () => {
     const remoteVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
     const selfVideoRef = useRef<HTMLVideoElement>(null);
     const localStreamReadyRef = useRef(false);
+    const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
+    const [breakoutSessions, setBreakoutSessions] = useState<BreakoutSession>({
+    rooms: [],
+    isActive: false,
+    assignments: [],
+    duration: 10,
+    startTime: null,
+    autoreturn: true
+    });
+    const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
+    const currentRoomIdRef = useRef<string | null>(null); // Ref for socket listeners
+
+    const [isInBreakoutRoom, setIsInBreakoutRoom] = useState(false);
+
+    const [showJoinModal, setShowJoinModal] = useState(false);
+    const [assignedRoom, setAssignedRoom] = useState<BreakoutRoom | null>(null);
+
+    const [activePolls,setActivePolls] = useState<Poll[]> ([]);
+    const [userVotedPolls,setUserVotedPolls] = useState<Set<string>>(new Set()); // 'pollId': true/false
+    const [showCreatePollModal,setShowCreatePollModal] = useState<boolean>(false);
+
+    const activePollsRef = useRef<Poll[]>([]);
+    const userVotedPollsRef = useRef<Set<string>>(new Set());
+
+    const handlecreatePoll = (pollData: Omit<Poll, 'id'>) => {
+        if(!socketRef.current) return;
+        socketRef.current.emit('create-poll', {
+            ...pollData,
+            classroomId: classroomId
+        });
+        toast.success('Poll created successfully!');
+    };
+
+    const handleSubmitVote = (pollId: string, selectedOptionIds: string[]) => { 
+        if(!socketRef.current) return;
+        setUserVotedPolls(prev => new Set(prev).add(pollId));
+        socketRef.current.emit('submit-poll-response', {
+            pollId,
+            userId: mySocketId,
+            selectedOptionIds,
+            userName: user?.name || 'Guest',
+            timestamp: Date.now()
+        });
+        toast.success('Vote submitted successfully!');
+    };
+
+    const handleClosePoll = (pollId: string) => {   
+        if(!socketRef.current || user?.userType !== 'teacher') return;
+        socketRef.current.emit('close-poll', {
+            pollId
+        });
+        toast.success('Poll closed successfully!');
+    };
+
+    const handleBreakoutTimerUp = () => {
+        console.log('Breakout room timer up!');
+        if(breakoutSessions.autoreturn && isInBreakoutRoom) {
+            handlereturnToMainRoom();
+        }
+        toast('Breakout room time is up!', {
+            icon: '⏰',
+            duration: 3000
+        });
+        if(user?.userType === 'teacher') {
+            toast('close breakoutrooms when ready', {   
+            icon: '⏰',
+            duration: 5000
+            });
+        }
+    };
+
+    const timeRemaining = useBreakoutTimer(
+        breakoutSessions.duration,
+        breakoutSessions.startTime,
+        handleBreakoutTimerUp);
+
+    useAudioAnalyzer(
+    localStream,
+    mySocketId,
+    (userId: string, isSpeaking: boolean) => {
+        if (isSpeaking) {
+            handleUserStartedSpeaking(userId);
+        } else {
+            handleUserStoppedSpeaking(userId);
+        }
+    }
+);
+    
 
 
 
@@ -111,10 +217,32 @@ const classroomId = courseId || 'default-classroom';
         }
     };
 
-    const handleScreenShare = () => {
+    const handleScreenShare = async () => {
     const newState = !isScreenSharing; // Toggle the state
-    console.log('🖥️ STEP 1: Button clicked! New state:', newState);
+   if(newState) {
+    const screenStream = await peerManager.startScreenShare();
+    
+    if(!screenStream){
+        toast('screen sharing cancelled',{
+            icon:'⚠️',
+            duration: 2000,
+        });
+        return;
+    } 
+    toast.success('You are now screen sharing.', {
+        icon: '🖥️',
+        duration: 3000,
+    });
+}
+else{
+    peerManager.stopScreenShare();
+    toast.success('You have stopped screen sharing.', {
+        icon: '🛑',
+        duration: 3000,
+    });
+}
     setIsScreenSharing(newState);
+        
     
     if (socketRef.current) {
         console.log('📤 STEP 2: Emitting to server:', { classroomId, isSharing: newState });
@@ -173,6 +301,24 @@ const handleToggleCamera = () => {
         });
     }
 }
+
+//Add a user to speaking users set
+const handleUserStartedSpeaking = (userId: string) => {
+    setSpeakingUsers(prev => {
+        const newSet = new Set(prev);
+        newSet.add(userId);
+        return newSet;
+    });
+};
+
+//Remove a user from speaking users set
+const handleUserStoppedSpeaking = (userId: string) => {
+    setSpeakingUsers(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(userId);
+        return newSet;
+    });
+};
 
 const handleToggleMuteAll = () => {
     if(user?.userType === 'teacher') {
@@ -244,6 +390,138 @@ const toggleMetaverseMode = () => {
     setIsMetaverseMode(!isMetaverseMode);
 }
 
+// Filter participants based on breakout room
+const getVisibleParticipants = (): Participant[] => {
+    if (!isInBreakoutRoom || !currentRoomId) {
+        // In main room - show everyone
+        return participants;
+    }
+    
+    // In breakout room - only show people in same room
+    const currentRoom = breakoutSessions.rooms.find(r => r.id === currentRoomId);
+    if (!currentRoom) {
+        console.log('⚠️ Current room not found, showing all participants');
+        return participants;
+    }
+    
+    // Filter to only participants in this room
+    const roomParticipants = participants.filter(p => 
+        currentRoom.participants.includes(p.id) || p.id === socketRef.current?.id
+    );
+    
+    console.log(`🚪 In room ${currentRoom.name}, showing ${roomParticipants.length} participants:`, 
+        roomParticipants.map(p => p.name));
+    
+    return roomParticipants;
+};
+
+const handleCreateBreakoutRooms = (numRooms: number, duration: number, autoAssign: boolean) => {
+    const rooms = generateRooms(numRooms,mySocketId);
+    console.log('Created breakout rooms:', rooms);
+
+    const students = participants.filter(p => p.role === 'student');
+    console.log('🎓 Students found:', students);
+    console.log('📋 All participants:', participants);
+
+    let assignments: RoomAssignment[] = [];
+    if(autoAssign) {
+        assignments = autoAssignStudents(students, rooms);
+        console.log('📝 Assignments created:', assignments);
+    }
+
+    const session: BreakoutSession = {
+        isActive: true,
+        rooms,
+        assignments,
+        duration,
+        startTime: Date.now(),
+        autoreturn: true
+    };
+    setBreakoutSessions(session);
+    if(socketRef.current) {
+        socketRef.current.emit('create-breakout-rooms', {
+            classroomId,
+            session
+        });
+    }
+   toast.success(`Created ${numRooms} breakout rooms!`, {
+    icon: '🚪',
+    duration: 3000
+  });
+};
+
+const handleJoinBreakoutRoom = (roomId: string) => {
+    console.log('🔵 handleJoinBreakoutRoom called with roomId:', roomId);
+    
+    // Set roomId ref FIRST before anything else
+    currentRoomIdRef.current = roomId;
+    console.log('✅ Set currentRoomIdRef.current to:', currentRoomIdRef.current);
+    
+    // Only cleanup peer connections, NOT local stream
+    peerManager.cleanupPeersOnly();
+    
+    setIsInBreakoutRoom(true);
+    setCurrentRoomId(roomId);
+    setShowJoinModal(false);
+    
+    if(socketRef.current) {
+        console.log('📤 Emitting join-breakout-room with userId:', socketRef.current.id);
+        socketRef.current.emit('join-breakout-room', {
+            classroomId,
+            roomId,
+            userId: socketRef.current.id,
+        });
+    }
+    const room = breakoutSessions.rooms.find(r => r.id === roomId) || null;
+      toast.success(`Joined ${room?.name}!`, {
+    icon: '🎯',
+    duration: 2000
+  });
+};
+
+const handlereturnToMainRoom = () => {  
+    console.log('Returning to main classroom');
+    
+    // Only cleanup peer connections, NOT local stream
+    peerManager.cleanupPeersOnly();
+    
+    setIsInBreakoutRoom(false);
+    setCurrentRoomId(null);
+    currentRoomIdRef.current = null; // Clear ref
+    
+    if(socketRef.current) {
+        socketRef.current.emit('leave-breakout-room', {
+            classroomId,
+            userId: socketRef.current.id,
+        });
+    }
+    toast.success('Returned to main classroom.', {
+    icon: '🏠',
+    duration: 2000
+  });
+}
+
+const handleCloseBreakoutRooms = () => {
+    console.log('Closing all breakout rooms');
+    setBreakoutSessions({
+        rooms: [],
+        isActive: false,
+        assignments: [],
+        duration: 10,
+        startTime: null,
+        autoreturn: true
+    });
+    if(socketRef.current) {
+        socketRef.current.emit('close-breakout-rooms', {
+            classroomId,
+        });
+    }
+    toast.success('All breakout rooms closed.', {
+    icon: '❌',
+    duration: 3000
+    });
+};
+
     // Connect to Socket.io server
 useEffect(() => {
     socketRef.current = io('http://localhost:3001');
@@ -268,6 +546,9 @@ useEffect(() => {
                 //create  peer connection (you are the initiator because you joined first)
                 //concept : existing user initiate connection to new user
                 peerManager.createPeer(newParticipant.id, true);
+                if(isScreenSharing) {
+                    peerManager.sendCurrentVideoToNewPeer(newParticipant.id);
+                }
             }
         
     });
@@ -333,6 +614,9 @@ useEffect(() => {
     socketRef.current.on('screen-share-updated', ({ participants }) => {
         console.log('📺 Received screen-share-updated. Participants:', participants);
         setParticipants(participants);
+
+        const sharingParticipant = participants.find((p: Participant) => p.isScreenSharing);
+        setScreenSharingUserId(sharingParticipant ? sharingParticipant.id : null);
     });
 
     //Listen for audio toggled
@@ -407,6 +691,153 @@ useEffect(() => {
         
     });
 
+    socketRef.current.on('breakout-rooms-created', ({ session }) => {
+        console.log('Received: breakout-rooms-created:', session);
+        setBreakoutSessions(session);
+        
+        const actualSocketId = socketRef.current?.id || '';
+        console.log('🔍 My userType:', user?.userType);
+        console.log('🔍 My socketId (state):', mySocketId);
+        console.log('🔍 My socketId (actual):', actualSocketId);
+        
+        if(user?.userType === 'student') {
+            console.log('👨‍🎓 I am a student, looking for my assignment...');
+            console.log('📋 All assignments:', session.assignments);
+            
+            const myAssignment = session.assignments.find((a: RoomAssignment) => a.userId === actualSocketId);
+            console.log('🎯 My assignment:', myAssignment);
+            
+            if(myAssignment && myAssignment.assignedRoomId) {
+                const room = session.rooms.find((r: BreakoutRoom) => r.id === myAssignment.assignedRoomId) || null;
+                console.log('🚪 My assigned room:', room);
+                if(room) {
+                    setAssignedRoom(room);
+                    setShowJoinModal(true);
+                    console.log('✅ Modal should show now!');
+                } else {
+                    console.log('❌ Room not found!');
+                }
+            } else {
+                console.log('❌ No assignment found for me!');
+            }
+        } else {
+            console.log('👨‍🏫 I am NOT a student (userType:', user?.userType, ')');
+        }
+    });
+
+    socketRef.current.on('room-peers-list',({roomId,peerIds})=>{
+          console.log(`📨 Peers in ${roomId}:`, peerIds);
+          console.log(`🔍 My ID:`, socketRef.current?.id);
+        peerIds.forEach((peerId: string) => {
+            if(peerId !== socketRef.current?.id){
+                console.log(`🔗 Creating peer (as initiator) to:`, peerId);
+                peerManager.createPeer(peerId, true);
+            }
+        });
+    });
+
+    socketRef.current.on('user-joined-room', ({roomId, userId}) => {
+        console.log(`🚪 user-joined-room event: roomId=${roomId}, userId=${userId}`);
+        console.log(`🔍 My currentRoomId:`, currentRoomIdRef.current);
+        console.log(`🔍 My socket ID:`, socketRef.current?.id);
+        
+        if(roomId === currentRoomIdRef.current && userId !== socketRef.current?.id){
+            console.log(`✅ Creating peer (as responder) to new user:`, userId);
+            peerManager.createPeer(userId, false);
+        } else {
+            console.log(`❌ Not creating peer - different room or it's me`);
+        }
+    });
+
+    socketRef.current.on('user-left-room', ({roomId, userId}) => {
+        console.log(`🚫 user-left-room event: roomId=${roomId}, userId=${userId}`);
+        if(roomId === currentRoomIdRef.current && userId !== socketRef.current?.id){
+            console.log(`🗑️ Destroying peer for:`, userId);
+            peerManager.destroyPeer(userId);
+        }
+    });
+
+    socketRef.current.on('breakout-rooms-closed', () => {
+        console.log('Received: breakout-rooms-closed');
+        if(isInBreakoutRoom) {
+            handlereturnToMainRoom();
+        }
+        setBreakoutSessions({
+            rooms: [],
+            isActive: false,
+            assignments: [],
+            duration: 10,
+            startTime: null,
+            autoreturn: true
+        });
+    });
+
+    // Listen for main room participant list after breakout closes
+    socketRef.current.on('main-room-participants', ({ participants }) => {
+        console.log('🏠 Back in main room, reconnecting to:', participants);
+        // Reconnect to all participants in main room
+        participants.forEach((peerId: string) => {
+            console.log('🔗 Creating peer connection to:', peerId);
+            peerManager.createPeer(peerId, true);
+        });
+    });
+
+    // Listen for breakout session updates (when participants join/leave rooms)
+    socketRef.current.on('breakout-session-updated', ({ session }) => {
+        console.log('Received: breakout-session-updated', session);
+        setBreakoutSessions(session);
+    });
+
+    // ============================================
+// POLL SOCKET EVENTS
+// ============================================
+
+// Event 1: Poll Created (Teacher created new poll)
+socketRef.current.on('poll-created', (poll: Poll) => {
+  console.log('📊 Poll created:', poll);
+  
+  setActivePolls(prev => [...prev, poll]);
+  
+  // Notify students
+  if (user?.userType === 'student') {
+    toast(`New poll: ${poll.question}`, {
+      duration: 5000,
+      icon: '📊'
+    });
+    
+    // Auto-switch to polls tab for better UX
+    setActiveTab('polls');
+  }
+});
+
+// Event 2: Poll Updated (Vote counts changed)
+socketRef.current.on('poll-updated', (updatedPoll: Poll) => {
+  console.log('📊 Poll updated:', updatedPoll);
+  
+  setActivePolls(prev =>
+    prev.map(p => p.id === updatedPoll.id ? updatedPoll : p)
+  );
+});
+
+// Event 3: Poll Closed (Teacher closed poll)
+socketRef.current.on('poll-closed', ({ poll, results }: { poll: Poll, results: PollResults }) => {
+  console.log('📊 Poll closed:', poll, results);
+  
+  setActivePolls(prev =>
+    prev.map(p => p.id === poll.id ? poll : p)
+  );
+  
+  if (user?.userType === 'student') {
+    toast.success('Poll closed - viewing results now');
+  }
+});
+
+// Event 4: Existing Polls (Late joiner receives all active polls)
+socketRef.current.on('existing-polls', (polls: Poll[]) => {
+  console.log('📊 Received existing polls:', polls);
+  setActivePolls(polls);
+});
+
   
 
     // Cleanup on unmount
@@ -420,6 +851,11 @@ useEffect(() => {
             document
   .querySelectorAll('audio[id^="audio-"]')
   .forEach(el => el.remove());
+  // Cleanup poll listeners
+socketRef.current?.off('poll-created');
+socketRef.current?.off('poll-updated');
+socketRef.current?.off('poll-closed');
+socketRef.current?.off('existing-polls');
 
             socketRef.current?.disconnect();
     };
@@ -619,6 +1055,15 @@ useEffect(() => {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     };
 
+// Keep refs in sync with state
+useEffect(() => {
+  activePollsRef.current = activePolls;
+}, [activePolls]);
+
+useEffect(() => {
+  userVotedPollsRef.current = userVotedPolls;
+}, [userVotedPolls]);
+
 useEffect(() => {
     const timer = setInterval(() => {
         setSessionDuration((prev) => prev + 1);
@@ -631,9 +1076,19 @@ useEffect(() => {
             {/* Header */}
             <div className="bg-gray-800 text-white px-6 py-3 flex justify-between items-center">
                 <h1 className="text-xl font-bold">Virtual Classroom - Course {courseId}</h1>
+
+                
                 <div className="flex items-center gap-4">
                     <span className="text-green-400">● Live</span>
-                    <span className="text-gray-400">{participants?.length || 0} Participants</span>
+                    <span className="text-gray-400">{getVisibleParticipants().length} Participants</span>
+                    
+                    {/* Breakout Room Timer */}
+                    {isInBreakoutRoom && (
+                        <RoomTimer 
+                            timeRemaining={timeRemaining} 
+                            isActive={breakoutSessions.isActive} 
+                        />
+                    )}
                 </div>
                  <div className="text-right">
         <p className="text-gray-400 text-sm">Session Duration</p>
@@ -650,16 +1105,135 @@ useEffect(() => {
             currentUserId={user?.id || ''}
             onPositionUpdate={handlePositionUpdate}
         />
+    ) : screenSharingUserId ? (
+        /* SCREEN SHARE LAYOUT - Large screen + participant thumbnails */
+        <div className="flex flex-col h-full gap-4">
+            {/* Large Screen Share Display */}
+            <div className="flex-1 bg-gray-800 rounded-lg flex items-center justify-center relative overflow-hidden min-h-0">
+                <video
+                    autoPlay
+                    playsInline
+                    ref={(el) => {
+                        const stream = screenSharingUserId === mySocketId ? localStream : remoteStreams[screenSharingUserId];
+                        if (el && stream && el.srcObject !== stream) {
+                            el.srcObject = stream;
+                        }
+                    }}
+                    className="w-full h-full object-contain"
+                />
+                
+                {/* Overlay: Who is sharing */}
+                <div className="absolute top-4 left-4 bg-black/70 px-4 py-2 rounded-lg flex items-center gap-2">
+                    <Monitor className="w-5 h-5 text-green-400" />
+                    <span className="text-white font-semibold">
+                        {participants.find(p => p.id === screenSharingUserId)?.name || 'Someone'} is sharing screen
+                    </span>
+                </div>
+            </div>
+            
+            {/* Participant Thumbnails at Bottom */}
+            <div className="flex gap-2 overflow-x-auto pb-2">
+                {getVisibleParticipants().map((participant) => {
+                    const isCurrentUser = participant.id === mySocketId;
+                    const remoteStream = remoteStreams[participant.id];
+                    const hasVideo = isCurrentUser ? (localStream && !isVideoOff) : !!remoteStream;
+                    
+                    return (
+                       <div 
+  key={participant.id}
+  className={`
+    flex-shrink-0 w-32 h-24 bg-gray-800 rounded-lg relative overflow-hidden 
+    border-2 transition-all duration-300
+    ${speakingUsers.has(participant.id)
+      ? 'border-green-500 shadow-md shadow-green-500/50'
+      : 'border-gray-700'
+    }
+    hover:border-blue-500
+  `}
+>
+                            {hasVideo ? (
+                                isCurrentUser ? (
+                                    <video 
+                                        ref={(el) => {
+                                            if (el && localStream && el.srcObject !== localStream) {
+                                                el.srcObject = localStream;
+                                            }
+                                        }}
+                                        autoPlay 
+                                        muted 
+                                        playsInline
+                                        className="w-full h-full object-cover transform scale-x-[-1]"
+                                    />
+                                ) : (
+                                    <video
+                                        autoPlay
+                                        playsInline
+                                        ref={(el) => {
+                                            const stream = remoteStreams[participant.id];
+                                            if (el && stream && el.srcObject !== stream) {
+                                                el.srcObject = stream;
+                                            }
+                                        }}
+                                        className="w-full h-full object-cover"
+                                    />
+                                )
+                            ) : (
+                                <div className="flex items-center justify-center h-full">
+                                    <Video className="w-6 h-6 text-gray-500" />
+                                </div>
+                            )}
+                            
+                            {/* Name label */}
+                            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent px-2 py-1">
+                                <p className="text-white text-xs truncate font-medium">
+                                    {participant.name}
+                                    {isCurrentUser && ' (You)'}
+                                </p>
+                            </div>
+                            
+                            {/* Mute indicators */}
+                            <div className="absolute top-1 right-1 flex gap-1">
+                                {participant.isAudioMuted && (
+                                    <div className="bg-red-600 rounded-full p-1">
+                                        <MicOff className="w-3 h-3 text-white" />
+                                    </div>
+                                )}
+                                {participant.isVideoOff && (
+                                    <div className="bg-red-600 rounded-full p-1">
+                                        <VideoOff className="w-3 h-3 text-white" />
+                                    </div>
+                                )}
+                            </div>
+                            
+                            {/* You badge */}
+                            {isCurrentUser && (
+                                <div className="absolute top-1 left-1 bg-blue-600 px-2 py-0.5 rounded text-xs text-white font-semibold">
+                                    You
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+        </div>
     ) : (
         <>
                    {/* Instructor Video (Large) */}
-{participants.filter(p => p.role === 'instructor').map((instructor) => {
+{getVisibleParticipants().filter(p => p.role === 'instructor').map((instructor) => {
     const isCurrentUser = instructor.id === mySocketId; // ✅ Compare socket IDs
     const remoteStream = remoteStreams[instructor.id];
     const hasVideo = isCurrentUser ? (localStream && !isVideoOff) : !!remoteStream;
     
     return (
-    <div key={instructor.id} className="bg-gray-800 rounded-lg mb-4 aspect-video flex items-center justify-center relative overflow-hidden">
+    <div key={instructor.id}  className={`
+    bg-gray-800 rounded-lg mb-4 aspect-video flex items-center justify-center relative overflow-hidden
+    border-4 transition-all duration-300
+    ${speakingUsers.has(instructor.id) 
+      ? 'border-green-500 shadow-lg shadow-green-500/50 ring-2 ring-green-400' 
+      : 'border-transparent'
+    }
+  `}
+>
         {/* Show video for current user OR remote instructor */}
         {hasVideo ? (
             isCurrentUser ? (
@@ -738,7 +1312,7 @@ useEffect(() => {
 )})}
 
 {/* If no instructor, show placeholder */}
-{participants.filter(p => p.role === 'instructor').length === 0 && (
+{getVisibleParticipants().filter(p => p.role === 'instructor').length === 0 && (
     <div className="bg-gray-800 rounded-lg mb-4 aspect-video flex items-center justify-center">
         <div className="text-center">
             <Video className="w-16 h-16 text-gray-500 mx-auto mb-2" />
@@ -750,7 +1324,7 @@ useEffect(() => {
 
                     {/* Student Videos Grid */}
                     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                        {participants.filter(p => p.role === 'student').map((participant) => {
+                        {getVisibleParticipants().filter(p => p.role === 'student').map((participant) => {
                             const isCurrentUser = participant.id === mySocketId;
                             const remoteStream = remoteStreams[participant.id];
                             const hasVideo = isCurrentUser ? (localStream && !isVideoOff) : !!remoteStream;
@@ -758,11 +1332,17 @@ useEffect(() => {
                             return (
                             <div 
                                 key={participant.id} 
-                                onClick={() => setSelectedParticipant(participant.id)}
-                                className={`bg-gray-800 rounded-lg aspect-video flex items-center justify-center relative cursor-pointer transition-all hover:ring-2 hover:ring-blue-500 overflow-hidden ${
-                                    selectedParticipant === participant.id ? 'ring-2 ring-blue-500' : ''
-                                }`}
-                            >
+                                className={`
+                                    bg-gray-800 rounded-lg aspect-video flex items-center justify-center relative cursor-pointer 
+                                    border-4 transition-all duration-300 overflow-hidden
+                                    ${speakingUsers.has(participant.id)
+                                    ? 'border-green-500 shadow-lg shadow-green-500/50'
+                                    : 'border-transparent'
+                                    }
+                                    ${selectedParticipant === participant.id ? 'ring-2 ring-blue-500' : ''}
+                                    hover:ring-2 hover:ring-blue-500
+                                `}
+                                >
                                 {/* Show video for current user OR remote participants */}
                                 {hasVideo ? (
                                     isCurrentUser ? (
@@ -865,9 +1445,33 @@ useEffect(() => {
                         >
                             Participants ({participants.length})
                         </button>
+                        {/* Breakout Tab - Only for Instructor */}
+                        {user?.userType === 'teacher' && (
+                            <button 
+                                onClick={() => setActiveTab('breakout')}
+                                className={`flex-1 py-3 transition-colors ${
+                                    activeTab === 'breakout' ? 'text-white bg-gray-700' : 'text-gray-400 hover:text-white'
+                                }`}
+                            >
+                                Breakout
+                            </button>
+                        )}
+                        {/* Polls Tab */}
+                        <button 
+                            onClick={() => setActiveTab('polls')}
+                            className={`flex-1 py-3 transition-colors ${
+                                activeTab === 'polls' ? 'text-white bg-gray-700' : 'text-gray-400 hover:text-white'
+                            }`}
+                        >
+                            Polls {activePolls.length > 0 && (
+                                <span className="ml-1 bg-blue-600 text-white text-xs px-2 py-0.5 rounded-full">
+                                    {activePolls.length}
+                                </span>
+                            )}
+                        </button>
                     </div>
 
-                   {/* Content Area - Chat or Participants */}
+                   {/* Content Area - Chat or Participants or Breakout */}
 {activeTab === 'chat' ? (
     <>
         <div className="flex-1 overflow-y-auto p-4 space-y-3">
@@ -933,7 +1537,7 @@ useEffect(() => {
             </button>
         </div>
     </>
-) : (
+) : activeTab === 'participants' ? (
                         <div className="flex-1 overflow-y-auto p-4">
                             <div className="space-y-2">
                                 {participants.length === 0 ? (
@@ -1004,16 +1608,114 @@ useEffect(() => {
                                 )}
                             </div>
                         </div>
-                    )}
+                    ) : activeTab === 'breakout' ? (
+                        /* Breakout Rooms Panel */
+                        <div className="flex-1 overflow-y-auto p-4">
+                            <BreakoutControlPanel 
+                                participants={participants}
+                                onCreateRooms={handleCreateBreakoutRooms}
+                                onCloseRooms={handleCloseBreakoutRooms}
+                                isActive={breakoutSessions.isActive}
+                                currentSession={breakoutSessions}
+                            />
+                        </div>
+                    ) : activeTab === 'polls' ? (
+                        /* Polls Panel */
+                        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                            {/* Teacher: Create Poll Button */}
+                            {user?.userType === 'teacher' && (
+                                <button
+                                    onClick={() => setShowCreatePollModal(true)}
+                                    className="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 font-medium"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                                    </svg>
+                                    Create New Poll
+                                </button>
+                            )}
 
-                  
+                            {/* Display Active Polls */}
+                            {activePolls.length === 0 ? (
+                                <div className="text-center py-12 text-gray-400">
+                                    <svg className="mx-auto mb-4 text-gray-600" xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                        <line x1="18" y1="20" x2="18" y2="10"></line>
+                                        <line x1="12" y1="20" x2="12" y2="4"></line>
+                                        <line x1="6" y1="20" x2="6" y2="14"></line>
+                                    </svg>
+                                    <p className="text-sm">No active polls</p>
+                                    {user?.userType === 'teacher' && (
+                                        <p className="text-xs mt-2">Create a poll to engage your students</p>
+                                    )}
+                                </div>
+                            ) : (
+                                <div className="space-y-4">
+                                    {activePolls.map((poll) => (
+                                        <div key={poll.id}>
+                                            {user?.userType === 'teacher' ? (
+                                                <PollResultsView
+                                                    poll={poll}
+                                                    onClosePoll={handleClosePoll}
+                                                    isTeacher={true}
+                                                />
+                                            ) : (
+                                                poll.isActive && !userVotedPolls.has(poll.id) ? (
+                                                    <PollVoteCard
+                                                        poll={poll}
+                                                        onSubmitVote={handleSubmitVote}
+                                                        hasVoted={userVotedPolls.has(poll.id)}
+                                                    />
+                                                ) : (
+                                                    <PollResultsView
+                                                        poll={poll}
+                                                        onClosePoll={undefined}
+                                                        isTeacher={false}
+                                                    />
+                                                )
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    ) : null}
+
                     
                 </div>
             </div>
 
+            {/* Breakout Room Join Modal */}
+            {showJoinModal && assignedRoom && (
+                <BreakoutRoomJoinModal 
+                    roomName={assignedRoom.name}
+                    onJoin={() => handleJoinBreakoutRoom(assignedRoom.id)}
+                    onDecline={() => setShowJoinModal(false)}
+                    duration={breakoutSessions.duration}
+                />
+            )}
+
+            {/* Create Poll Modal */}
+            <CreatePollModal
+                isOpen={showCreatePollModal}
+                onClose={() => setShowCreatePollModal(false)}
+                onCreatePoll={handlecreatePoll}
+                classroomId={classroomId}
+                currentUserId={mySocketId}
+            />
+
             {/* Bottom Control Panel */}    
 
             <div className="bg-gray-800 px-6 py-4 flex justify-center items-center gap-4">
+                {/* Return to Main Room Button (Students in Breakout Rooms) */}
+                {isInBreakoutRoom && user?.userType === 'student' && (
+                    <button 
+                        onClick={handlereturnToMainRoom}
+                        className="px-6 py-3 rounded-lg bg-purple-600 hover:bg-purple-700 text-white font-semibold flex items-center gap-2"
+                    >
+                        🏠 Return to Main Room
+                    </button>
+                )}
                 <button
                     onClick={() => handleToggleMic()}
                     className={`p-4 rounded-full ${isMuted ? 'bg-red-500' : 'bg-gray-700'} hover:bg-gray-600`}
