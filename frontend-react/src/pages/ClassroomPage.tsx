@@ -19,10 +19,8 @@ import { useBreakoutTimer } from '../hooks/useBreakoutTimer';
 import {
   autoAssignStudents,
   generateRooms,
-  getParticipantsInRoom,
-  canCreateBreakoutRooms
 } from '../utils/breakoutHelpers';
-import { Poll, PollResults,PollResponse } from '../types/polls';
+import { Poll, PollResults } from '../types/polls';
 import CreatePollModal from '../components/polls/CreatePollModal';
 import PollVoteCard from '../components/polls/PollVoteCard';
 import PollResultsView from '../components/polls/PollResultsView';
