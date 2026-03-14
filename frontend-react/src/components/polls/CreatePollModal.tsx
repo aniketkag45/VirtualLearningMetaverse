@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X, Plus, Trash2 } from "lucide-react";
-import {Poll, PollOption} from "../../types/polls";
+import {Poll} from "../../types/polls";
 
 interface CreatePollModalProps {
     isOpen: boolean;

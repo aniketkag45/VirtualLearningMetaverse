@@ -132,7 +132,7 @@ class PeerManager {
     };
 
     // Handle errors
-    pc.onicecandidateerror = (event) => {
+    pc.onicecandidateerror = (_event) => {
      // console.warn(`⚠️ ICE candidate error for ${peerId}:`, event);
     };
 
@@ -246,7 +246,7 @@ async startScreenShare() : Promise<MediaStream | null> {
     this.originalCameraTrack = this.localStream?.getVideoTracks()[0] || null;
 
     // Replace video track in local stream
-    this.peers.forEach((peerConnection, peerId) => {
+    this.peers.forEach((_peerConnection, peerId) => {
       this.replaceVideoTrack(peerId, screenTrack);
     });
 
@@ -266,7 +266,7 @@ async startScreenShare() : Promise<MediaStream | null> {
     if (!this.isSharingScreen || !this.originalCameraTrack) return;
 
     // Replace screen track with original camera track
-    this.peers.forEach((peerConnection, peerId) => {
+    this.peers.forEach((_peerConnection, peerId) => {
       this.replaceVideoTrack(peerId, this.originalCameraTrack!);
     });
     this.isSharingScreen = false;

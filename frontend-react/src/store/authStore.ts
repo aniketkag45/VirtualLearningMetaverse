@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import { User, AuthResponse } from '../types'
+// Local type definitions (this store is superseded by src/stores/authStore.ts)
+interface User { id: string; email: string; name: string; userType: string; avatar?: string }
+interface AuthResponse { user: User; accessToken: string; refreshToken: string }
 
 interface AuthState {
   user: User | null

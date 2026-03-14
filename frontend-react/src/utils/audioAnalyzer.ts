@@ -39,7 +39,7 @@ class AudioAnalyzer {
         if (!this.analyzer || !this.dataArray) return;
 
         // Get time domain data (actual audio waveform)
-        this.analyzer.getByteTimeDomainData(this.dataArray);
+        this.analyzer.getByteTimeDomainData(this.dataArray as Uint8Array<ArrayBuffer>);
 
         // Calculate RMS (Root Mean Square) - proper audio volume measurement
         let sumSquares = 0;
