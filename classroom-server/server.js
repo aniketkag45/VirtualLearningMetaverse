@@ -10,10 +10,23 @@ const allowedOrigins = (process.env.FRONTEND_URLS || 'http://localhost:5173,http
     .map((origin) => origin.trim())
     .filter(Boolean);
 
+const isAllowedOrigin = (origin) => {
+    if (!origin) return true;
+    if (allowedOrigins.includes(origin)) return true;
+
+    // Allow Vercel preview/production domains for frontend deployments.
+    try {
+        const { hostname } = new URL(origin);
+        return hostname.endsWith('.vercel.app');
+    } catch (_error) {
+        return false;
+    }
+};
+
 const corsOptions = {
     origin: (origin, callback) => {
         // Allow non-browser requests (no origin) and configured frontends.
-        if (!origin || allowedOrigins.includes(origin)) {
+        if (isAllowedOrigin(origin)) {
             callback(null, true);
             return;
         }
@@ -36,7 +49,14 @@ app.get('/health', (_req, res) => {
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: allowedOrigins,
+        origin: (origin, callback) => {
+            if (isAllowedOrigin(origin)) {
+                callback(null, true);
+                return;
+            }
+
+            callback(new Error(`Socket CORS blocked for origin: ${origin}`));
+        },
         methods: ['GET', 'POST']
     }
 });

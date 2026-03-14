@@ -177,6 +177,7 @@ const ClassroomPage = () => {
 
     /* 🔐 IMPORTANT: Track created peers */
   const createdPeersRef = useRef<Set<string>>(new Set());
+    const hasJoinedClassroomRef = useRef(false);
 
 
 const participantsRef = useRef<Participant[]>([]);
@@ -902,6 +903,19 @@ useEffect(() => {
 // Initialize WebRTC and local media
 useEffect(() => {
     const initWebRTC = async () => {
+        const emitJoinClassroomOnce = () => {
+            if (!socketRef.current || hasJoinedClassroomRef.current) return;
+
+            socketRef.current.emit('join-classroom', {
+                classroomId: classroomId,
+                userName: user?.name || 'Guest',
+                role: user?.userType === 'teacher' ? 'instructor' : 'student'
+            });
+
+            hasJoinedClassroomRef.current = true;
+            console.log('📡 Joined classroom');
+        };
+
         try {
             // Set up peer event callbacks FIRST (before getting media stream)
             // This ensures callbacks are ready if we receive offers early
@@ -995,20 +1009,15 @@ useEffect(() => {
             setLocalStream(stream);
             localStreamReadyRef.current = true;
 
-            // NOW join the classroom after media is ready
-            if (socketRef.current) {
-                socketRef.current.emit('join-classroom', {
-                    classroomId: classroomId,
-                    userName: user?.name || 'Guest',
-                    role: user?.userType === 'teacher' ? 'instructor' : 'student'
-                });
-                console.log('📡 Joined classroom after media ready');
-            }
+            // Join the classroom after media is ready.
+            emitJoinClassroomOnce();
 
             console.log('✅ WebRTC initialized');
         } catch (error) {
             console.error('❌ Failed to initialize WebRTC:', error);
-            toast.error('Could not access camera/microphone');
+            // Still join classroom so chat/participants/polls work without A/V permission.
+            emitJoinClassroomOnce();
+            toast.error('Could not access camera/microphone. Joined classroom in limited mode.');
         }
     };
 
@@ -1020,6 +1029,7 @@ useEffect(() => {
     return () => {
         if (mySocketId) {
             peerManager.cleanup();
+            hasJoinedClassroomRef.current = false;
         }
     };
 }, [mySocketId]); // Run when socket ID is available
