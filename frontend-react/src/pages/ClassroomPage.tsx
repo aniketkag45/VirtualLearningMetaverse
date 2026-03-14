@@ -60,6 +60,7 @@ const playSound = (soundType: 'join' | 'leave' | 'message'|'notification') => {
 const ClassroomPage = () => {
     const { courseId } = useParams();
     const navigate = useNavigate();
+    const SOCKET_URL = ((import.meta as any).env?.VITE_SOCKET_URL as string) || 'http://localhost:3001';
     
     // State
     const [isMuted, setIsMuted] = useState(false);
@@ -524,7 +525,7 @@ const handleCloseBreakoutRooms = () => {
 
     // Connect to Socket.io server
 useEffect(() => {
-    socketRef.current = io('http://localhost:3001');
+        socketRef.current = io(SOCKET_URL);
     
     // Store our socket ID for identifying ourselves
     socketRef.current.on('connect', () => {
@@ -859,7 +860,7 @@ socketRef.current?.off('existing-polls');
 
             socketRef.current?.disconnect();
     };
-}, [classroomId, user?.name]);
+}, [classroomId, user?.name, SOCKET_URL]);
 
 // // Initialize spatial audio when entering metaverse mode
 useEffect(() => {

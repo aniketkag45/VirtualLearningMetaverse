@@ -5,13 +5,39 @@ const cors = require('cors');
 const { create } = require('domain');
 
 const app = express();
-app.use(cors());
+const allowedOrigins = (process.env.FRONTEND_URLS || 'http://localhost:5173,http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+
+const corsOptions = {
+    origin: (origin, callback) => {
+        // Allow non-browser requests (no origin) and configured frontends.
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+            return;
+        }
+
+        callback(new Error(`CORS blocked for origin: ${origin}`));
+    },
+    methods: ['GET', 'POST']
+};
+
+app.use(cors(corsOptions));
+
+app.get('/', (_req, res) => {
+    res.status(200).send('VirtualLearningMetaverse Socket server is running');
+});
+
+app.get('/health', (_req, res) => {
+    res.status(200).json({ status: 'ok' });
+});
 
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
-        origin: "http://localhost:3000",
-        methods: ["GET", "POST"]
+        origin: allowedOrigins,
+        methods: ['GET', 'POST']
     }
 });
 
@@ -620,7 +646,8 @@ function hasUserVoted(pollId, userId) {
     });
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`Socket.io server running on http://localhost:${PORT}`);
+    console.log(`Socket.io server running on port ${PORT}`);
+    console.log(`Allowed CORS origins: ${allowedOrigins.join(', ')}`);
 });
