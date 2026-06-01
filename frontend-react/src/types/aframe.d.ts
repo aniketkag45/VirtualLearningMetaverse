@@ -9,5 +9,8 @@ declare namespace JSX {
     'a-camera': any;
     'a-light': any;
     'a-text': any;
+    'a-assets': any;
+    'a-cylinder': any;
+    'a-torus': any;
     }
 }
