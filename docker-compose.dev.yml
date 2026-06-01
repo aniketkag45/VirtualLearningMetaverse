@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: vlm-postgres
+    environment:
+      POSTGRES_DB: vlm
+      POSTGRES_USER: vlm
+      POSTGRES_PASSWORD: vlm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vlm -d vlm"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: vlm-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: vlm-livekit
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    environment:
+      LIVEKIT_KEYS: devkey: secret
+
+  classroom-server:
+    build:
+      context: ./classroom-server
+    container_name: vlm-classroom-server
+    environment:
+      PORT: 3001
+      FRONTEND_URLS: http://localhost:3000,http://localhost:5173
+      LIVEKIT_URL: ws://localhost:7880
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: secret
+    ports:
+      - "3001:3001"
+
+  backend-spring:
+    build:
+      context: ./backend-spring
+    container_name: vlm-backend-spring
+    environment:
+      PORT: 8080
+      DATABASE_URL: jdbc:postgresql://postgres:5432/vlm
+      DATABASE_USERNAME: vlm
+      DATABASE_PASSWORD: vlm
+      JWT_SECRET: change-this-dev-secret-change-this-dev-secret-change-this-dev-secret
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

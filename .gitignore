@@ -1,10 +1,22 @@
 # Dependencies
 **/node_modules/
+node_modules/
+frontend-react/node_modules/
+classroom-server/node_modules/
+frontend-react/.env
+classroom-server/.env
 
 # Build artifacts
 **/dist/
 **/build/
 **/.vite/
+
+# Java / Maven / Gradle
+**/target/
+**/*.class
+**/*.jar
+**/*.war
+**/*.ear
 
 # Environment files
 **/.env
@@ -14,7 +26,18 @@
 # Logs
 **/*.log
 
+# Test coverage
+**/coverage/
+**/.nyc_output/
+
 # OS/editor
 .DS_Store
 Thumbs.db
 .vscode/
+
+# IDEs
+.idea/
+**/*.iml
+.classpath
+.project
+.settings/

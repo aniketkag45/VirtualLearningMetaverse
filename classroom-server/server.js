@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
+const { AccessToken } = require('livekit-server-sdk');
 const { create } = require('domain');
 
 const app = express();
@@ -37,6 +39,7 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+app.use(express.json());
 
 app.get('/', (_req, res) => {
     res.status(200).send('VirtualLearningMetaverse Socket server is running');
@@ -44,6 +47,54 @@ app.get('/', (_req, res) => {
 
 app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok' });
+});
+
+app.post('/api/livekit/token', async (req, res) => {
+    try {
+        const apiKey = process.env.LIVEKIT_API_KEY;
+        const apiSecret = process.env.LIVEKIT_API_SECRET;
+        const livekitUrl = process.env.LIVEKIT_URL || 'ws://localhost:7880';
+
+        if (!apiKey || !apiSecret) {
+            res.status(503).json({
+                success: false,
+                message: 'LiveKit credentials are not configured on the server.'
+            });
+            return;
+        }
+
+        const { roomName, participantName, participantId, role } = req.body || {};
+        const safeRoomName = String(roomName || 'default-classroom').slice(0, 120);
+        const safeParticipantName = String(participantName || 'Guest').slice(0, 80);
+        const safeParticipantId = String(participantId || `${safeParticipantName}-${Date.now()}`).slice(0, 120);
+
+        const token = new AccessToken(apiKey, apiSecret, {
+            identity: safeParticipantId,
+            name: safeParticipantName,
+            ttl: '2h',
+            metadata: JSON.stringify({ role: role || 'student' })
+        });
+
+        token.addGrant({
+            room: safeRoomName,
+            roomJoin: true,
+            canPublish: true,
+            canSubscribe: true,
+            canPublishData: true
+        });
+
+        res.status(200).json({
+            success: true,
+            data: {
+                token: await token.toJwt(),
+                url: livekitUrl,
+                roomName: safeRoomName
+            }
+        });
+    } catch (error) {
+        console.error('LiveKit token error:', error);
+        res.status(500).json({ success: false, message: 'Could not create LiveKit token.' });
+    }
 });
 
 const server = http.createServer(app);
@@ -67,48 +118,233 @@ const avatarPositions = new Map(); // Map<classroomId, Map<socketId, {position, 
 const breakoutSessions = new Map(); // Map<sessionId, Map<socketId, participantData>>
 const classroomPolls = new Map(); // Map<classroomId, Array of polls>
 const pollResponses = new Map(); // Map<pollId, Map<userId, response>>
+const classroomWhiteboards = new Map(); // Map<classroomId, Array<stroke>>
+const classroomWhiteboardPermissions = new Map(); // Map<classroomId, { studentsCanWrite: boolean }>
+const classroomViewModes = new Map(); // Map<classroomId, 'video' | 'metaverse'>
+const waitingRooms = new Map(); // Map<classroomId, Map<socketId, request>>
+const privateChatHistories = new Map(); // Map<classroomId:sortedUserPair, Array<message>>
+
+function getDefaultAvatarPosition(role, index) {
+    if (role === 'instructor') {
+        return { position: { x: -4.8, y: 1.6, z: -6.6 }, rotation: { x: 0, y: 0, z: 0 } };
+    }
+
+    const seats = [
+        { x: -6, z: 4.8 }, { x: -2, z: 4.8 }, { x: 2, z: 4.8 }, { x: 6, z: 4.8 },
+        { x: -6, z: 1.6 }, { x: -2, z: 1.6 }, { x: 2, z: 1.6 }, { x: 6, z: 1.6 },
+        { x: -6, z: -1.6 }, { x: -2, z: -1.6 }, { x: 2, z: -1.6 }, { x: 6, z: -1.6 }
+    ];
+    const seat = seats[index % seats.length];
+    return { position: { x: seat.x, y: 1.6, z: seat.z }, rotation: { x: 0, y: 0, z: 0 } };
+}
+
+function ensureAvatarPosition(classroomId, socketId, role, index = 0) {
+    if (!avatarPositions.has(classroomId)) {
+        avatarPositions.set(classroomId, new Map());
+    }
+    const classroomAvatars = avatarPositions.get(classroomId);
+    if (!classroomAvatars.has(socketId)) {
+        classroomAvatars.set(socketId, getDefaultAvatarPosition(role, index));
+    }
+}
+
+function buildAvatarsData(classroomId) {
+    const classroom = classrooms.get(classroomId);
+    const classroomAvatars = avatarPositions.get(classroomId);
+    if (!classroom || !classroomAvatars) return [];
+
+    const avatarsData = [];
+    classroomAvatars.forEach((avatarData, socketId) => {
+        const participant = classroom.get(socketId);
+        if (participant) {
+            avatarsData.push({
+                id: participant.id,
+                name: participant.name,
+                role: participant.role,
+                isAudioMuted: participant.isAudioMuted,
+                hasRaisedHand: participant.hasRaisedHand,
+                isScreenSharing: participant.isScreenSharing,
+                position: avatarData.position,
+                rotation: avatarData.rotation
+            });
+        }
+    });
+    return avatarsData;
+}
+
+function getWhiteboardPermission(classroomId) {
+    if (!classroomWhiteboardPermissions.has(classroomId)) {
+        classroomWhiteboardPermissions.set(classroomId, { studentsCanWrite: false });
+    }
+    return classroomWhiteboardPermissions.get(classroomId);
+}
+
+function getPollsForClassroom(classroomId) {
+    return classroomPolls.get(classroomId) || [];
+}
+
+function findClassroomByPollId(pollId) {
+    for (const [classroomId, polls] of classroomPolls.entries()) {
+        if (polls.some(poll => poll.id === pollId)) {
+            return classroomId;
+        }
+    }
+    return null;
+}
+
+function getWaitingRoom(classroomId) {
+    if (!waitingRooms.has(classroomId)) {
+        waitingRooms.set(classroomId, new Map());
+    }
+    return waitingRooms.get(classroomId);
+}
+
+function addParticipantToClassroom(socket, { classroomId, userName, role }) {
+    socket.join(classroomId);
+    socket.leave(`waiting:${classroomId}`);
+
+    if (!classrooms.has(classroomId)) {
+        classrooms.set(classroomId, new Map());
+    }
+
+    const classroom = classrooms.get(classroomId);
+    classroom.set(socket.id, {
+        id: socket.id,
+        name: userName,
+        role,
+        isAudioMuted: false,
+        isVideoOff: false,
+        hasRaisedHand: false,
+        isScreenSharing: false
+    });
+
+    ensureAvatarPosition(classroomId, socket.id, role, classroom.size - 1);
+
+    io.to(classroomId).emit('user-joined', {
+        userId: socket.id,
+        userName,
+        participants: Array.from(classroom.values())
+    });
+
+    const existingPolls = getPollsForClassroom(classroomId);
+    if (existingPolls.length > 0) {
+        socket.emit('existing-polls', existingPolls);
+    }
+
+    socket.emit('whiteboard-permission-state', {
+        classroomId,
+        studentsCanWrite: getWhiteboardPermission(classroomId).studentsCanWrite
+    });
+
+    socket.emit('classroom-view-mode-changed', {
+        classroomId,
+        mode: classroomViewModes.get(classroomId) || 'video',
+        controlledBy: 'server-state'
+    });
+
+    io.to(classroomId).emit('avatars-updated', {
+        avatars: buildAvatarsData(classroomId)
+    });
+}
+
+function notifyTeachersOfWaitingRoom(classroomId) {
+    const waiting = Array.from(getWaitingRoom(classroomId).values());
+    io.to(classroomId).emit('admission-requests-state', { classroomId, requests: waiting });
+}
 
 io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
-    // Join a classroom
+    // Join a classroom. Teachers enter directly; students wait until admitted.
     socket.on('join-classroom', ({ classroomId, userName, role }) => {
-        socket.join(classroomId);
-        
-        // Add participant to classroom
-        if (!classrooms.has(classroomId)) {
-            classrooms.set(classroomId, new Map());
+        const normalizedRole = role === 'instructor' ? 'instructor' : 'student';
+
+        // Teachers/instructors enter directly and receive current waiting list.
+        if (normalizedRole === 'instructor') {
+            addParticipantToClassroom(socket, { classroomId, userName, role: normalizedRole });
+            notifyTeachersOfWaitingRoom(classroomId);
+            console.log(`${userName} joined classroom ${classroomId} as instructor`);
+            return;
         }
 
-
-        
-        const classroom = classrooms.get(classroomId);
-        classroom.set(socket.id, {
+        // Students go to waiting room first, like Google Meet.
+        const request = {
             id: socket.id,
-            name: userName,
-            role: role,
-            isAudioMuted: false,
-            isVideoOff: false,
-            hasRaisedHand: false,
-            isScreenSharing: false // Initialize screen sharing as false
+            socketId: socket.id,
+            classroomId,
+            userName: userName || 'Student',
+            role: 'student',
+            requestedAt: Date.now()
+        };
+
+        socket.join(`waiting:${classroomId}`);
+        socket.data.pendingAdmission = request;
+        getWaitingRoom(classroomId).set(socket.id, request);
+
+        socket.emit('waiting-room-status', {
+            classroomId,
+            status: 'waiting',
+            message: 'Waiting for teacher to let you in...'
         });
 
-        // Notify all users in classroom
-        io.to(classroomId).emit('user-joined', {
-            userId: socket.id,
-            userName: userName,
-            participants: Array.from(classroom.values())
-        });
+        notifyTeachersOfWaitingRoom(classroomId);
+        console.log(`${request.userName} is waiting for admission to ${classroomId}`);
+    });
 
-        // SEND EXISTING POLLS TO NEW JOINER
-        const existingPolls = getPollsForClassroom(classroomId);
-        if (existingPolls.length > 0) {
-            socket.emit('existing-polls', existingPolls);
-            console.log(`📊 Sent ${existingPolls.length} existing polls to ${userName}`);
+    socket.on('admit-student', ({ classroomId, studentSocketId }) => {
+        const classroom = classrooms.get(classroomId);
+        const teacher = classroom?.get(socket.id);
+        if (!teacher || teacher.role !== 'instructor') {
+            socket.emit('admission-error', { message: 'Only the teacher can admit students.' });
+            return;
         }
 
-        console.log(`${userName} joined classroom ${classroomId}`);
+        const waitingRoom = getWaitingRoom(classroomId);
+        const request = waitingRoom.get(studentSocketId);
+        const studentSocket = io.sockets.sockets.get(studentSocketId);
+        if (!request || !studentSocket) {
+            waitingRoom.delete(studentSocketId);
+            notifyTeachersOfWaitingRoom(classroomId);
+            return;
+        }
+
+        waitingRoom.delete(studentSocketId);
+        addParticipantToClassroom(studentSocket, {
+            classroomId,
+            userName: request.userName,
+            role: 'student'
+        });
+
+        studentSocket.emit('admission-approved', { classroomId });
+        notifyTeachersOfWaitingRoom(classroomId);
+        console.log(`${request.userName} admitted to ${classroomId}`);
     });
+
+    socket.on('reject-student', ({ classroomId, studentSocketId }) => {
+        const classroom = classrooms.get(classroomId);
+        const teacher = classroom?.get(socket.id);
+        if (!teacher || teacher.role !== 'instructor') {
+            socket.emit('admission-error', { message: 'Only the teacher can reject students.' });
+            return;
+        }
+
+        const waitingRoom = getWaitingRoom(classroomId);
+        const request = waitingRoom.get(studentSocketId);
+        const studentSocket = io.sockets.sockets.get(studentSocketId);
+        waitingRoom.delete(studentSocketId);
+
+        if (studentSocket) {
+            studentSocket.emit('admission-rejected', {
+                classroomId,
+                message: 'Teacher did not admit you to this classroom.'
+            });
+            studentSocket.leave(`waiting:${classroomId}`);
+        }
+
+        notifyTeachersOfWaitingRoom(classroomId);
+        console.log(`${request?.userName || studentSocketId} rejected from ${classroomId}`);
+    });
+
 
     // Send chat message
     socket.on('send-message', ({ classroomId, message, senderName }) => {
@@ -123,42 +359,160 @@ io.on('connection', (socket) => {
         io.to(classroomId).emit('receive-message', chatMessage);
     });
 
+    // Send one-to-one private classroom message
+    socket.on('send-private-message', ({ classroomId, targetUserId, message, senderName }) => {
+        const classroom = classrooms.get(classroomId);
+        const sender = classroom?.get(socket.id);
+        const recipient = classroom?.get(targetUserId);
+
+        if (!classroom || !sender || !recipient) {
+            socket.emit('private-message-error', { message: 'Private message failed. User is no longer in this classroom.' });
+            return;
+        }
+
+        const trimmedMessage = typeof message === 'string' ? message.trim() : '';
+        if (!trimmedMessage) return;
+
+        const privateMessage = {
+            id: `pm-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+            classroomId,
+            senderId: socket.id,
+            senderName: senderName || sender.name,
+            recipientId: targetUserId,
+            recipientName: recipient.name,
+            message: trimmedMessage.slice(0, 2000),
+            timestamp: new Date(),
+            isPrivate: true
+        };
+
+        const historyKey = getPrivateChatHistoryKey(classroomId, socket.id, targetUserId);
+        const history = privateChatHistories.get(historyKey) || [];
+        history.push(privateMessage);
+        privateChatHistories.set(historyKey, history.slice(-500));
+
+        socket.emit('receive-private-message', privateMessage);
+        io.to(targetUserId).emit('receive-private-message', privateMessage);
+    });
+
+    socket.on('private-chat-history', ({ classroomId, peerId }) => {
+        const classroom = classrooms.get(classroomId);
+        if (!classroom || !classroom.has(socket.id) || !classroom.has(peerId)) return;
+
+        const historyKey = getPrivateChatHistoryKey(classroomId, socket.id, peerId);
+        socket.emit('private-chat-history', {
+            classroomId,
+            peerId,
+            messages: privateChatHistories.get(historyKey) || []
+        });
+    });
+
+    // Teacher can force everyone into/out of 3D classroom mode.
+    socket.on('set-classroom-view-mode', ({ classroomId, mode }) => {
+        const classroom = classrooms.get(classroomId);
+        const participant = classroom?.get(socket.id);
+
+        if (!participant || participant.role !== 'instructor') {
+            socket.emit('classroom-view-mode-error', { message: 'Only the teacher can control everyone\'s classroom view.' });
+            return;
+        }
+
+        const safeMode = mode === 'metaverse' ? 'metaverse' : 'video';
+        classroomViewModes.set(classroomId, safeMode);
+        io.to(classroomId).emit('classroom-view-mode-changed', {
+            classroomId,
+            mode: safeMode,
+            controlledBy: socket.id
+        });
+    });
+
+    // ============================================
+    // REAL-TIME WHITEBOARD EVENTS
+    // ============================================
+    socket.on('whiteboard-request-state', ({ classroomId }) => {
+        const strokes = classroomWhiteboards.get(classroomId) || [];
+        socket.emit('whiteboard-state', { classroomId, strokes });
+        socket.emit('whiteboard-permission-state', {
+            classroomId,
+            studentsCanWrite: getWhiteboardPermission(classroomId).studentsCanWrite
+        });
+    });
+
+    socket.on('whiteboard-set-permission', ({ classroomId, studentsCanWrite }) => {
+        const classroom = classrooms.get(classroomId);
+        const participant = classroom?.get(socket.id);
+
+        if (!participant || participant.role !== 'instructor') {
+            socket.emit('whiteboard-error', { message: 'Only the teacher can control whiteboard permissions.' });
+            return;
+        }
+
+        const permission = { studentsCanWrite: Boolean(studentsCanWrite) };
+        classroomWhiteboardPermissions.set(classroomId, permission);
+        io.to(classroomId).emit('whiteboard-permission-state', { classroomId, ...permission });
+    });
+
+    socket.on('whiteboard-stroke', ({ classroomId, stroke }) => {
+        const classroom = classrooms.get(classroomId);
+        const participant = classroom?.get(socket.id);
+        if (!classroom || !participant || !stroke) return;
+
+        const permission = getWhiteboardPermission(classroomId);
+        if (participant.role !== 'instructor' && !permission.studentsCanWrite) {
+            socket.emit('whiteboard-error', { message: 'The teacher has locked student writing on the board.' });
+            return;
+        }
+
+        const safeStroke = {
+            ...stroke,
+            classroomId,
+            userId: socket.id,
+            userName: participant.name,
+            createdAt: Date.now(),
+            points: Array.isArray(stroke.points) ? stroke.points.slice(0, 5000) : []
+        };
+
+        const strokes = classroomWhiteboards.get(classroomId) || [];
+        strokes.push(safeStroke);
+        classroomWhiteboards.set(classroomId, strokes.slice(-2000)); // Memory safety for prototype gateway
+
+        // Broadcast to everyone including sender so 3D board textures update everywhere.
+        io.to(classroomId).emit('whiteboard-stroke', safeStroke);
+    });
+
+    socket.on('whiteboard-clear', ({ classroomId }) => {
+        const classroom = classrooms.get(classroomId);
+        const participant = classroom?.get(socket.id);
+
+        if (!participant || participant.role !== 'instructor') {
+            socket.emit('whiteboard-error', { message: 'Only the instructor can clear the whiteboard.' });
+            return;
+        }
+
+        classroomWhiteboards.set(classroomId, []);
+        io.to(classroomId).emit('whiteboard-cleared', { classroomId, clearedBy: socket.id });
+    });
+
     socket.on('avatar-move', ({classroomId, position, rotation}) => {
         const classroom = classrooms.get(classroomId);
-        if (!classrooms.has(classroomId)) return;
+        if (!classroom || !classroom.has(socket.id)) return;
 
-        if(classroom){
-            //store avatar position
-            if(!avatarPositions.has(classroomId)){
-                avatarPositions.set(classroomId,new Map());
-            }
-            const classroomAvatars = avatarPositions.get(classroomId);
-            classroomAvatars.set(socket.id,{position,rotation});
-
-            //build avatar data with participant info
-            const avatarsData = [];
-            classroomAvatars.forEach((avatarData,socketId)=>{
-                const participant = classroom.get(socketId);
-                if(participant){
-                    avatarsData.push({
-                        id: participant.id,
-                        name: participant.name,
-                        position: avatarData.position,
-                        rotation: avatarData.rotation
-                    });
-                }
-            });
-            //broadcast to others
-            io.to(classroomId).emit('avatars-updated',{
-                avatars:avatarsData
-            });
+        if(!avatarPositions.has(classroomId)){
+            avatarPositions.set(classroomId,new Map());
         }
+        const classroomAvatars = avatarPositions.get(classroomId);
+        classroomAvatars.set(socket.id,{position,rotation});
+
+        // Broadcast to other users only. The sender already knows their own position.
+        socket.to(classroomId).emit('avatars-updated',{
+            avatars: buildAvatarsData(classroomId)
+        });
     });
+
 
     // WebRTC Signaling - Relay offer/answer/ICE candidates between peers
     // CONCEPT: Server doesn't handle media, just coordinates peer connection setup
     socket.on('webrtc-offer',({classroomId,targetPeerId,signal})=>{
-        console.log(`Relaying WebRTC offer from ${socket.id} to ${targetPeerId}`);
+        // console.log(`Relaying WebRTC offer from ${socket.id} to ${targetPeerId}`);
         io.to(targetPeerId).emit('webrtc-offer',{
             peerId: socket.id,
             signal: signal
@@ -166,7 +520,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('webrtc-answer',({classroomId,targetPeerId,signal})=>{
-        console.log(`Relaying WebRTC answer from ${socket.id} to ${targetPeerId}`);
+        // console.log(`Relaying WebRTC answer from ${socket.id} to ${targetPeerId}`);
         io.to(targetPeerId).emit('webrtc-answer',{
             peerId: socket.id,
             signal: signal
@@ -174,7 +528,7 @@ io.on('connection', (socket) => {
     });
 
     socket.on('webrtc-ice-candidate',({classroomId,targetPeerId,signal})=>{
-        console.log(`Relaying ICE candidate from ${socket.id} to ${targetPeerId}`);
+        // ICE candidates can be very noisy; do not log every candidate in production/dev performance mode.
         io.to(targetPeerId).emit('webrtc-ice-candidate',{
             peerId: socket.id,
             signal: signal
@@ -193,6 +547,7 @@ io.on('connection', (socket) => {
                 hasRaised: hasRaised,
                 participants: Array.from(classroom.values())
             });
+            io.to(classroomId).emit('avatars-updated', { avatars: buildAvatarsData(classroomId) });
         }
     });
 
@@ -220,6 +575,7 @@ io.on('connection', (socket) => {
                 isMuted: isMuted,
                 participants: Array.from(classroom.values())
             });
+            io.to(classroomId).emit('avatars-updated', { avatars: buildAvatarsData(classroomId) });
         }
     });
 
@@ -601,6 +957,18 @@ socket.on('close-poll', ({ pollId }) => {
 // HELPER FUNCTIONS
 // ============================================
 
+function getWhiteboardPermission(classroomId) {
+  if (!classroomWhiteboardPermissions.has(classroomId)) {
+    // Default: students can watch the board, teacher controls writing.
+    classroomWhiteboardPermissions.set(classroomId, { studentsCanWrite: false });
+  }
+  return classroomWhiteboardPermissions.get(classroomId);
+}
+
+function getPrivateChatHistoryKey(classroomId, userA, userB) {
+  return `${classroomId}:${[userA, userB].sort().join(':')}`;
+}
+
 /**
  * Find which classroom a poll belongs to
  * @param {string} pollId 
@@ -641,7 +1009,11 @@ function hasUserVoted(pollId, userId) {
     socket.on('disconnect', () => {
         console.log('User disconnected:', socket.id);
 
-       
+        const pendingAdmission = socket.data.pendingAdmission;
+        if (pendingAdmission?.classroomId) {
+            getWaitingRoom(pendingAdmission.classroomId).delete(socket.id);
+            notifyTeachersOfWaitingRoom(pendingAdmission.classroomId);
+        }
         
         // Remove from all classrooms
         classrooms.forEach((classroom, classroomId) => {

@@ -16,6 +16,18 @@ export interface ChatMessage{
     timestamp: Date;
 }
 
+export interface PrivateChatMessage {
+    id: string;
+    classroomId: string;
+    senderId: string;
+    senderName: string;
+    recipientId: string;
+    recipientName: string;
+    message: string;
+    timestamp: Date | string;
+    isPrivate: true;
+}
+
 export interface ClassroomSettings{
     id: string;
     courseId: string;

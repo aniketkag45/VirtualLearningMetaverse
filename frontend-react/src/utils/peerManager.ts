@@ -20,6 +20,7 @@ class PeerManager {
   private originalCameraTrack: MediaStreamTrack | null = null;
   private isSharingScreen: boolean = false;
  private screenTrack: MediaStreamTrack | null = null;
+  private videoPausedForPerformance: boolean = false;
 
   // STUN servers for NAT traversal
   private iceServers = {
@@ -31,7 +32,11 @@ class PeerManager {
   async initializeLocalStream(enableVideo: boolean = true, enableAudio: boolean = true): Promise<MediaStream> {
     try {
       this.localStream = await navigator.mediaDevices.getUserMedia({
-        video: enableVideo ? { width: { ideal: 640 }, height: { ideal: 480 } } : false,
+        video: enableVideo ? {
+          width: { ideal: 320, max: 480 },
+          height: { ideal: 240, max: 360 },
+          frameRate: { ideal: 15, max: 20 }
+        } : false,
         audio: enableAudio ? {
           echoCancellation: true,
           noiseSuppression: true,
@@ -54,6 +59,10 @@ class PeerManager {
 
   async createPeer(peerId: string, initiator: boolean) {
    // console.log(initiator ? '📤 Creating initiator peer for' : '📥 Creating receiver peer for', peerId);
+
+    if (this.peers.has(peerId)) {
+      return;
+    }
 
     // Create RTCPeerConnection
     const pc = new RTCPeerConnection(this.iceServers);
@@ -112,6 +121,7 @@ class PeerManager {
       //  console.log(`✅ Peer ${peerId} CONNECTED successfully!`);
       } else if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
       //  console.log(`❌ Peer ${peerId} connection ${pc.connectionState}`);
+        this.peers.delete(peerId);
         if (this.callbacks) {
           this.callbacks.onClose(peerId);
         }
@@ -139,6 +149,10 @@ class PeerManager {
     // Store peer connection
     this.peers.set(peerId, { pc, stream: null });
 
+    if (this.videoPausedForPerformance) {
+      await this.replaceVideoTrack(peerId, null);
+    }
+
     // If initiator, create offer
     if (initiator) {
       try {
@@ -148,7 +162,8 @@ class PeerManager {
         const sender = pc.getSenders().find(s => s.track?.kind === 'video');
 if (sender) {
   const params = sender.getParameters();
-  params.encodings[0].maxBitrate = 500000; // 500 kbps
+  if (!params.encodings[0]) params.encodings[0] = {};
+  params.encodings[0].maxBitrate = 180000; // lightweight classroom video
   await sender.setParameters(params);
 }
 
@@ -157,7 +172,7 @@ if (sender) {
         if (audioSender) {
           const audioParams = audioSender.getParameters();
           if (!audioParams.encodings[0]) audioParams.encodings[0] = {};
-          audioParams.encodings[0].maxBitrate = 32000; // 32 kbps voice quality
+          audioParams.encodings[0].maxBitrate = 24000; // lightweight voice quality
           await audioSender.setParameters(audioParams);
         }
         
@@ -288,7 +303,7 @@ async startScreenShare() : Promise<MediaStream | null> {
     }
   }
 
-      private async replaceVideoTrack(peerId: string, newTrack: MediaStreamTrack) : Promise<void> {
+      private async replaceVideoTrack(peerId: string, newTrack: MediaStreamTrack | null) : Promise<void> {
         const peerData = this.peers.get(peerId);
         if (!peerData) return;
 
@@ -301,6 +316,10 @@ async startScreenShare() : Promise<MediaStream | null> {
         }
       }
   
+
+  hasPeer(peerId: string): boolean {
+    return this.peers.has(peerId);
+  }
 
   destroyPeer(peerId: string) {
     const peerData = this.peers.get(peerId);
@@ -320,12 +339,78 @@ async startScreenShare() : Promise<MediaStream | null> {
     }
   }
 
+  async pauseVideoSendingForPerformance() {
+    if (this.videoPausedForPerformance) return;
+    this.videoPausedForPerformance = true;
+
+    const currentVideoTracks = this.localStream?.getVideoTracks() || [];
+    // Fully detach video from all peer connections first.
+    const tasks: Promise<void>[] = [];
+    this.peers.forEach((_peerData, peerId) => {
+      tasks.push(this.replaceVideoTrack(peerId, null));
+    });
+    await Promise.allSettled(tasks);
+
+    // Stop camera hardware in 3D mode for real performance gain.
+    // This turns off the camera light and removes camera encoding cost.
+    currentVideoTracks.forEach(track => {
+      try {
+        track.enabled = false;
+        track.stop();
+        this.localStream?.removeTrack(track);
+      } catch (_error) {}
+    });
+  }
+
+  async resumeVideoSendingAfterPerformancePause(): Promise<MediaStream | null> {
+    if (!this.videoPausedForPerformance) return this.localStream;
+    this.videoPausedForPerformance = false;
+
+    let track = this.localStream?.getVideoTracks()[0] || null;
+
+    // If the camera was stopped in 3D mode, reacquire it when returning to video view.
+    if (!track || track.readyState === 'ended') {
+      try {
+        const videoStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 320, max: 480 },
+            height: { ideal: 240, max: 360 },
+            frameRate: { ideal: 15, max: 20 }
+          },
+          audio: false,
+        });
+        track = videoStream.getVideoTracks()[0] || null;
+        if (track && this.localStream) {
+          this.localStream.addTrack(track);
+        } else if (track) {
+          this.localStream = new MediaStream([track]);
+        }
+      } catch (error) {
+        console.warn('Could not reacquire camera after 3D performance mode:', error);
+      }
+    }
+
+    if (track) track.enabled = true;
+
+    const tasks: Promise<void>[] = [];
+    this.peers.forEach((_peerData, peerId) => {
+      tasks.push(this.replaceVideoTrack(peerId, track));
+    });
+    await Promise.allSettled(tasks);
+    return this.localStream;
+  }
+
   setVideoEnabled(enabled: boolean) {
+    if (this.videoPausedForPerformance && enabled) {
+      this.resumeVideoSendingAfterPerformancePause();
+      return;
+    }
+
     if (this.localStream) {
       this.localStream.getVideoTracks().forEach(track => {
         track.enabled = enabled;
       });
-    //  console.log(enabled ? '📹 Video enabled' : '📹 Video disabled');
+    //  console.log(enabled ? '📹 Audio enabled' : '📹 Video disabled');
     }
   }
 

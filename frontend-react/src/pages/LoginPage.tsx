@@ -1,12 +1,15 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuthStore, User } from "../stores/useAuthStore";
+import { authApi } from "../lib/api";
 
 const LoginPage = () => {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
-  const [selectedRole, setSelectedRole] = useState<'student' | 'teacher'>('student');
+    const [selectedRole, setSelectedRole] = useState<'student' | 'teacher'>('student');
     const [error, setError] = useState({email: '', password: ''});
+    const [generalError, setGeneralError] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const navigate = useNavigate();
     const { login } = useAuthStore();
 
@@ -26,30 +29,25 @@ const LoginPage = () => {
       return !newError.email && !newError.password;
     }
 
-    const handleSubmit = (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setGeneralError('');
         
-        // Simple validation
         if (!validateForm()) {
-            
             return;
         }
 
-        const userdata: User = {
-          id: Date.now().toString(),
-          email: email,
-          name: email.split('@')[0],
-          userType: selectedRole
-        };
-
-      
-        // Call the login function from the auth store
-        login(userdata);
-        // For now, just log the credentials
-        console.log('Email:', email, 'Password:', password);
-        
-        // Navigate to dashboard
-        navigate('/dashboard');
+        setIsSubmitting(true);
+        try {
+          const result = await authApi.login(email, password);
+          login(result.user, result.accessToken);
+          navigate('/dashboard');
+        } catch (err) {
+          console.error('Backend login failed:', err);
+          setGeneralError('Could not login with backend. If backend is not running, use Demo Student/Teacher below.');
+        } finally {
+          setIsSubmitting(false);
+        }
     }
 
     const handleDemoLogin = (role: 'student' | 'teacher') => {
@@ -122,13 +120,22 @@ const LoginPage = () => {
         {error.password && (
           <p className="text-red-500 text-sm mb-3">{error.password}</p>
         )}
-        <button type="submit"
-        className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
-          Login
+        {generalError && (
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {generalError}
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
+        >
+          {isSubmitting ? 'Logging in...' : 'Login with Backend'}
           </button>
 
         <p className="text-xs text-gray-500 mt-3 text-center">
-          Demo mode: any email and password (min 6 chars) works.
+          Production mode uses Spring Boot auth. Demo buttons still work for local classroom testing.
         </p>
 
         <div className="mt-4 pt-4 border-t border-gray-200">

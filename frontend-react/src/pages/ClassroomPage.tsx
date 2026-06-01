@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Mic, MicOff, Video, VideoOff, Monitor, Hand, PhoneOff,X } from 'lucide-react';
-import { Participant, ChatMessage } from '../types/classroom';
+import { Participant, ChatMessage, PrivateChatMessage } from '../types/classroom';
 import { useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuthStore } from '../stores/useAuthStore';
@@ -24,6 +24,18 @@ import { Poll, PollResults } from '../types/polls';
 import CreatePollModal from '../components/polls/CreatePollModal';
 import PollVoteCard from '../components/polls/PollVoteCard';
 import PollResultsView from '../components/polls/PollResultsView';
+import RealtimeWhiteboard from '../components/classroom/RealtimeWhiteboard';
+import PrivateChatPanel from '../components/classroom/PrivateChatPanel';
+import LiveKitClassroom from '../components/classroom/LiveKitClassroom';
+
+interface AdmissionRequest {
+    id: string;
+    socketId: string;
+    classroomId: string;
+    userName: string;
+    role: 'student';
+    requestedAt: number;
+}
 
 const playSound = (soundType: 'join' | 'leave' | 'message'|'notification') => {
     const frequencies : { [key: string]: number } = {
@@ -59,6 +71,7 @@ const ClassroomPage = () => {
     const { courseId } = useParams();
     const navigate = useNavigate();
     const SOCKET_URL = ((import.meta as any).env?.VITE_SOCKET_URL as string) || 'http://localhost:3001';
+    const LIVEKIT_ENABLED = (((import.meta as any).env?.VITE_LIVEKIT_ENABLED as string) || 'false') === 'true';
     
     // State
     const [isMuted, setIsMuted] = useState(false);
@@ -68,7 +81,9 @@ const ClassroomPage = () => {
     const [hasRaisedHand, setHasRaisedHand] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [messageInput, setMessageInput] = useState('');
-    const [activeTab, setActiveTab] = useState<'chat' | 'participants' | 'breakout' | 'polls'>('chat');
+    const [privateMessages, setPrivateMessages] = useState<PrivateChatMessage[]>([]);
+    const [selectedPrivatePeerId, setSelectedPrivatePeerId] = useState<string | null>(null);
+    const [activeTab, setActiveTab] = useState<'chat' | 'private' | 'whiteboard' | 'participants' | 'breakout' | 'polls'>('chat');
     const [selectedParticipant, setSelectedParticipant] = useState<string | null>(null);
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const [screenSharingUserId, setScreenSharingUserId] = useState<string | null>(null);
@@ -84,6 +99,8 @@ const ClassroomPage = () => {
     const remoteVideoRefs = useRef<Record<string, HTMLVideoElement | null>>({});
     const selfVideoRef = useRef<HTMLVideoElement>(null);
     const localStreamReadyRef = useRef(false);
+    const isVideoOffRef = useRef(false);
+    const videoWasOffBeforeMetaverseRef = useRef(false);
     const [speakingUsers, setSpeakingUsers] = useState<Set<string>>(new Set());
     const [breakoutSessions, setBreakoutSessions] = useState<BreakoutSession>({
     rooms: [],
@@ -100,6 +117,8 @@ const ClassroomPage = () => {
 
     const [showJoinModal, setShowJoinModal] = useState(false);
     const [assignedRoom, setAssignedRoom] = useState<BreakoutRoom | null>(null);
+    const [isWaitingForAdmission, setIsWaitingForAdmission] = useState(false);
+    const [admissionRequests, setAdmissionRequests] = useState<AdmissionRequest[]>([]);
 
     const [activePolls,setActivePolls] = useState<Poll[]> ([]);
     const [userVotedPolls,setUserVotedPolls] = useState<Set<string>>(new Set()); // 'pollId': true/false
@@ -181,9 +200,15 @@ const ClassroomPage = () => {
 
 
 const participantsRef = useRef<Participant[]>([]);
+const lastAvatarRenderAtRef = useRef(0);
+const latestAvatarsRef = useRef<any[]>([]);
 useEffect(() => {
     participantsRef.current = participants;
 }, [participants]);
+
+useEffect(() => {
+    isVideoOffRef.current = isVideoOff;
+}, [isVideoOff]);
 
     const socketRef = useRef<Socket | null>(null);
 const { user } = useAuthStore();
@@ -199,6 +224,75 @@ const classroomId = courseId || 'default-classroom';
         });
         setMessageInput('');
     }
+};
+
+const handleSendPrivateMessage = (targetUserId: string, message: string) => {
+    if (!message.trim() || !socketRef.current) return;
+
+    socketRef.current.emit('send-private-message', {
+        classroomId,
+        targetUserId,
+        message,
+        senderName: user?.name || 'Guest'
+    });
+};
+
+const handleSelectPrivatePeer = (peerId: string) => {
+    setSelectedPrivatePeerId(peerId);
+    socketRef.current?.emit('private-chat-history', {
+        classroomId,
+        peerId
+    });
+};
+
+const handleAdmitStudent = (studentSocketId: string) => {
+    socketRef.current?.emit('admit-student', {
+        classroomId,
+        studentSocketId
+    });
+};
+
+const handleRejectStudent = (studentSocketId: string) => {
+    socketRef.current?.emit('reject-student', {
+        classroomId,
+        studentSocketId
+    });
+};
+
+const reconnectMediaPeersForVideoMode = () => {
+    const myId = socketRef.current?.id;
+    if (!myId) return;
+
+    peerManager.cleanupPeersOnly();
+    setRemoteStreams({});
+    document
+      .querySelectorAll('audio[id^="remote-audio-"]')
+      .forEach((el) => el.remove());
+
+    participantsRef.current.forEach((participant) => {
+        if (participant.id === myId) return;
+        // Deterministic initiator prevents both sides creating simultaneous offers.
+        if (myId < participant.id) {
+                if (!LIVEKIT_ENABLED) {
+                    peerManager.createPeer(participant.id, true);
+                }
+        }
+    });
+};
+
+const reconcileMediaPeers = (nextParticipants: Participant[] = participantsRef.current) => {
+    if (LIVEKIT_ENABLED) return;
+    const myId = socketRef.current?.id;
+    if (!myId || isWaitingForAdmission) return;
+
+    nextParticipants.forEach((participant) => {
+        if (participant.id === myId) return;
+        if (peerManager.hasPeer(participant.id)) return;
+
+        // Deterministic initiator prevents offer glare. All clients run the same rule.
+        const shouldInitiate = myId < participant.id;
+        peerManager.createPeer(participant.id, shouldInitiate);
+    });
 };
 
     // STEP-BY-STEP: Leave Classroom Handler
@@ -219,6 +313,15 @@ const classroomId = courseId || 'default-classroom';
 
     const handleScreenShare = async () => {
     const newState = !isScreenSharing; // Toggle the state
+      if (LIVEKIT_ENABLED) {
+    setIsScreenSharing(newState);
+    toast(newState ? 'You are now screen sharing.' : 'You stopped screen sharing.', {
+        icon: '🖥️',
+        duration: 2500,
+    });
+    return;
+   }
+
    if(newState) {
     const screenStream = await peerManager.startScreenShare();
     
@@ -387,7 +490,17 @@ const handlePositionUpdate = (position: any, rotation: any) => {
 };
 
 const toggleMetaverseMode = () => {
-    setIsMetaverseMode(!isMetaverseMode);
+    const nextMode = !isMetaverseMode;
+
+    if (user?.userType === 'teacher' && socketRef.current) {
+        socketRef.current.emit('set-classroom-view-mode', {
+            classroomId,
+            mode: nextMode ? 'metaverse' : 'video'
+        });
+        return;
+    }
+
+    setIsMetaverseMode(nextMode);
 }
 
 // Filter participants based on breakout room
@@ -532,25 +645,53 @@ useEffect(() => {
         setMySocketId(socketRef.current?.id || '');
     });
 
-    // Listen for new users
+    socketRef.current.on('waiting-room-status', ({ message }: { message: string }) => {
+        setIsWaitingForAdmission(true);
+        toast(message || 'Waiting for teacher to let you in...', {
+            icon: '⏳',
+            duration: 4000,
+        });
+    });
+
+    socketRef.current.on('admission-approved', () => {
+        setIsWaitingForAdmission(false);
+        toast.success('Teacher admitted you to the classroom.');
+        setTimeout(() => reconcileMediaPeers(), 800);
+    });
+
+    socketRef.current.on('admission-rejected', ({ message }: { message: string }) => {
+        setIsWaitingForAdmission(false);
+        toast.error(message || 'Teacher rejected your request.');
+        setTimeout(() => navigate('/dashboard'), 1600);
+    });
+
+    socketRef.current.on('admission-requests-state', ({ requests }: { requests: AdmissionRequest[] }) => {
+        setAdmissionRequests(requests || []);
+        if ((requests || []).length > 0 && user?.userType === 'teacher') {
+            playSound('notification');
+        }
+    });
+
+    socketRef.current.on('admission-error', ({ message }: { message: string }) => {
+        toast.error(message || 'Admission action failed.');
+    });
+
+    // Listen for participant changes and reconcile missing media connections.
     socketRef.current.on('user-joined', ({ participants }) => {
         setParticipants(participants);
-        const newParticipant = participants[participants.length - 1];
-            if(newParticipant && newParticipant.id !== socketRef.current?.id) {
-                playSound('join');
-                toast.success(`${newParticipant.name} has joined the classroom.`, {
-                    icon: '👋',
-                    duration: 3000,
-                });
+        participantsRef.current = participants;
 
-                //create  peer connection (you are the initiator because you joined first)
-                //concept : existing user initiate connection to new user
-                peerManager.createPeer(newParticipant.id, true);
-                if(isScreenSharing) {
-                    peerManager.sendCurrentVideoToNewPeer(newParticipant.id);
-                }
-            }
-        
+        const newParticipant = participants[participants.length - 1];
+        if(newParticipant && newParticipant.id !== socketRef.current?.id) {
+            playSound('join');
+            toast.success(`${newParticipant.name} has joined the classroom.`, {
+                icon: '👋',
+                duration: 3000,
+            });
+        }
+
+        setTimeout(() => reconcileMediaPeers(participants), 250);
+        setTimeout(() => reconcileMediaPeers(participants), 1500);
     });
 
 
@@ -559,6 +700,37 @@ useEffect(() => {
         setMessages((prev) => [...prev, message]);
         if(message.senderId !== user?.id)
             playSound('message');
+    });
+
+    socketRef.current.on('receive-private-message', (message: PrivateChatMessage) => {
+        setPrivateMessages((prev) => {
+            if (prev.some((existing) => existing.id === message.id)) return prev;
+            return [...prev, message];
+        });
+
+        if (message.senderId !== socketRef.current?.id) {
+            playSound('notification');
+            toast(`Private message from ${message.senderName}`, {
+                icon: '🔒',
+                duration: 3000,
+            });
+        }
+    });
+
+    socketRef.current.on('private-chat-history', ({ messages }: { messages: PrivateChatMessage[] }) => {
+        setPrivateMessages((prev) => {
+            const merged = [...prev];
+            messages.forEach((message) => {
+                if (!merged.some((existing) => existing.id === message.id)) {
+                    merged.push(message);
+                }
+            });
+            return merged.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+        });
+    });
+
+    socketRef.current.on('private-message-error', ({ message }: { message: string }) => {
+        toast.error(message || 'Private message failed.');
     });
 
     // Listen for user leaving
@@ -668,13 +840,17 @@ useEffect(() => {
     });
 
     socketRef.current.on('avatars-updated', ({ avatars }: { avatars: any[] }) => {
-        console.log('🧑‍🤝‍🧑 Received avatars-updated. Avatars:', avatars);
-        setAvatars(avatars);
+        latestAvatarsRef.current = avatars || [];
+        const now = Date.now();
+        if (now - lastAvatarRenderAtRef.current > 300) {
+            lastAvatarRenderAtRef.current = now;
+            setAvatars(latestAvatarsRef.current);
+        }
 
-        //update spatial audio sources for each avatar
+        // update spatial audio sources for each avatar without forcing extra React renders
         if(isMetaverseMode) {
-            avatars.forEach(avatar => {
-                if(avatar.id !== user?.id) {
+            latestAvatarsRef.current.forEach(avatar => {
+                if(avatar.id !== socketRef.current?.id) {
                     spatialAudioManager.updatePeerPosition(avatar.id, avatar.position);
                 }
             });
@@ -689,6 +865,57 @@ useEffect(() => {
             setTimeout(() => {
             navigate('/dashboard');},2000);
         
+    });
+
+    socketRef.current.on('classroom-view-mode-changed', ({ mode, controlledBy }) => {
+        const shouldUseMetaverse = mode === 'metaverse';
+
+         if (LIVEKIT_ENABLED) {
+            // LiveKit handles camera enable/disable via LiveKitMediaSync. No peer mesh work needed.
+            setIsMetaverseMode(shouldUseMetaverse);
+            if (controlledBy !== 'server-state') {
+                toast(shouldUseMetaverse ? 'Teacher moved everyone into 3D classroom.' : 'Teacher moved everyone back to video view.', {
+                    icon: shouldUseMetaverse ? '🏫' : '🎥',
+                    duration: 2500,
+                });
+            }
+            return;
+        }
+
+        if (shouldUseMetaverse) {
+            videoWasOffBeforeMetaverseRef.current = isVideoOffRef.current;
+            if (!isVideoOffRef.current) {
+                setIsVideoOff(true);
+                isVideoOffRef.current = true;
+                peerManager.pauseVideoSendingForPerformance();
+                socketRef.current?.emit('toggle-video', { classroomId, isOff: true });
+            }
+        } else if (!videoWasOffBeforeMetaverseRef.current) {
+            setIsVideoOff(false);
+            isVideoOffRef.current = false;
+            peerManager.resumeVideoSendingAfterPerformancePause().then((stream) => {
+                if (stream) {
+                    // Force React/video refs to re-attach to the fresh camera track.
+                    setLocalStream(null);
+                    setTimeout(() => setLocalStream(stream), 0);
+                }
+                socketRef.current?.emit('toggle-video', { classroomId, isOff: false });
+                // Rebuild peer connections so remote video tracks renegotiate cleanly.
+                setTimeout(reconnectMediaPeersForVideoMode, 350);
+            });
+        }
+
+        setIsMetaverseMode(shouldUseMetaverse);
+        if (controlledBy !== 'server-state') {
+            toast(shouldUseMetaverse ? 'Teacher moved everyone into 3D classroom. Camera paused for performance.' : 'Teacher moved everyone back to video view.', {
+                icon: shouldUseMetaverse ? '🏫' : '🎥',
+                duration: 2500,
+            });
+        }
+    });
+
+    socketRef.current.on('classroom-view-mode-error', ({ message }: { message: string }) => {
+        toast.error(message || 'Could not change classroom view.');
     });
 
     socketRef.current.on('breakout-rooms-created', ({ session }) => {
@@ -726,24 +953,26 @@ useEffect(() => {
     });
 
     socketRef.current.on('room-peers-list',({roomId,peerIds})=>{
+        if (LIVEKIT_ENABLED) return;
           console.log(`📨 Peers in ${roomId}:`, peerIds);
           console.log(`🔍 My ID:`, socketRef.current?.id);
         peerIds.forEach((peerId: string) => {
-            if(peerId !== socketRef.current?.id){
-                console.log(`🔗 Creating peer (as initiator) to:`, peerId);
+            if(peerId !== socketRef.current?.id && !peerManager.hasPeer(peerId)){
                 peerManager.createPeer(peerId, true);
             }
         });
     });
 
     socketRef.current.on('user-joined-room', ({roomId, userId}) => {
+        if (LIVEKIT_ENABLED) return;
         console.log(`🚪 user-joined-room event: roomId=${roomId}, userId=${userId}`);
         console.log(`🔍 My currentRoomId:`, currentRoomIdRef.current);
         console.log(`🔍 My socket ID:`, socketRef.current?.id);
         
         if(roomId === currentRoomIdRef.current && userId !== socketRef.current?.id){
-            console.log(`✅ Creating peer (as responder) to new user:`, userId);
-            peerManager.createPeer(userId, false);
+            if (!peerManager.hasPeer(userId)) {
+                peerManager.createPeer(userId, false);
+            }
         } else {
             console.log(`❌ Not creating peer - different room or it's me`);
         }
@@ -774,11 +1003,13 @@ useEffect(() => {
 
     // Listen for main room participant list after breakout closes
     socketRef.current.on('main-room-participants', ({ participants }) => {
+        if (LIVEKIT_ENABLED) return;
         console.log('🏠 Back in main room, reconnecting to:', participants);
         // Reconnect to all participants in main room
         participants.forEach((peerId: string) => {
-            console.log('🔗 Creating peer connection to:', peerId);
-            peerManager.createPeer(peerId, true);
+            if (!peerManager.hasPeer(peerId)) {
+                peerManager.createPeer(peerId, true);
+            }
         });
     });
 
@@ -856,6 +1087,16 @@ socketRef.current?.off('poll-created');
 socketRef.current?.off('poll-updated');
 socketRef.current?.off('poll-closed');
 socketRef.current?.off('existing-polls');
+socketRef.current?.off('receive-private-message');
+socketRef.current?.off('private-chat-history');
+socketRef.current?.off('private-message-error');
+socketRef.current?.off('classroom-view-mode-changed');
+socketRef.current?.off('classroom-view-mode-error');
+socketRef.current?.off('waiting-room-status');
+socketRef.current?.off('admission-approved');
+socketRef.current?.off('admission-rejected');
+socketRef.current?.off('admission-requests-state');
+socketRef.current?.off('admission-error');
 
             socketRef.current?.disconnect();
     };
@@ -1000,6 +1241,12 @@ useEffect(() => {
                 }
             });
 
+            if (LIVEKIT_ENABLED) {
+                emitJoinClassroomOnce();
+                console.log('✅ Socket classroom joined. LiveKit handles media.');
+                return;
+            }
+
             // Get camera/mic permission AFTER setting callbacks
             console.log('📹 Requesting camera/mic access...');
             const stream = await peerManager.initializeLocalStream(!isVideoOff, !isMuted);
@@ -1105,13 +1352,77 @@ useEffect(() => {
     </div>
             </div>
 
-            <div className="flex-1 flex overflow-hidden">
+            {user?.userType === 'teacher' && admissionRequests.length > 0 && (
+                <div className="border-b border-amber-500/30 bg-amber-500/10 px-6 py-3 text-white">
+                    <div className="flex flex-wrap items-center gap-3">
+                        <span className="font-semibold text-amber-200">Waiting room:</span>
+                        {admissionRequests.map((request) => (
+                            <div key={request.socketId} className="flex items-center gap-2 rounded-full bg-gray-900/70 px-3 py-1 text-sm">
+                                <span>{request.userName}</span>
+                                <button
+                                    onClick={() => handleAdmitStudent(request.socketId)}
+                                    className="rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold hover:bg-emerald-700"
+                                >
+                                    Admit
+                                </button>
+                                <button
+                                    onClick={() => handleRejectStudent(request.socketId)}
+                                    className="rounded-full bg-red-600 px-3 py-1 text-xs font-semibold hover:bg-red-700"
+                                >
+                                    Reject
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <div className="flex-1 flex overflow-hidden relative">
+                {isWaitingForAdmission && (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-slate-950/95 text-white backdrop-blur">
+                        <div className="max-w-md rounded-2xl border border-white/10 bg-white/10 p-8 text-center shadow-2xl">
+                            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-500/20 text-3xl">⏳</div>
+                            <h2 className="mb-2 text-2xl font-bold">Waiting for teacher to let you in</h2>
+                            <p className="text-sm text-slate-300">You are in the waiting room. Please stay on this screen until the teacher admits you.</p>
+                        </div>
+                    </div>
+                )}
                 {/* Main Video Area */}
                <div className="flex-1 p-4 overflow-y-auto">
-    {isMetaverseMode ? (
-        <MetaverseScene 
+        {LIVEKIT_ENABLED ? (
+        <div className="relative h-full">
+            <LiveKitClassroom
+                roomName={classroomId}
+                participantId={mySocketId || user?.id || `guest-${Date.now()}`}
+                participantName={user?.name || 'Guest'}
+                role={user?.userType === 'teacher' ? 'instructor' : 'student'}
+                isMetaverseMode={isMetaverseMode}
+                isMuted={isMuted}
+                isVideoOff={isVideoOff}
+                isScreenSharing={isScreenSharing}
+            />
+            {isMetaverseMode && (
+                <div className="absolute inset-0">
+                    <MetaverseScene
+                        avatars={avatars}
+                        currentUserId={mySocketId || ''}
+                        currentUserName={user?.name || 'You'}
+                        currentUserRole={user?.userType === 'teacher' ? 'instructor' : 'student'}
+                        classroomId={classroomId}
+                        socket={socketRef.current}
+                        onPositionUpdate={handlePositionUpdate}
+                    />
+                </div>
+            )}
+        </div>
+    ) : isMetaverseMode ? (
+        <MetaverseScene
             avatars={avatars}
-            currentUserId={user?.id || ''}
+            currentUserId={mySocketId || ''}
+            currentUserName={user?.name || 'You'}
+            currentUserRole={user?.userType === 'teacher' ? 'instructor' : 'student'}
+            classroomId={classroomId}
+            socket={socketRef.current}
             onPositionUpdate={handlePositionUpdate}
         />
     ) : screenSharingUserId ? (
@@ -1437,7 +1748,7 @@ useEffect(() => {
                 {/* Right Sidebar - Chat */}
                 <div className="w-80 bg-gray-800 flex flex-col">
                     {/* Tabs */}
-                    <div className="flex border-b border-gray-700">
+                    <div className="flex flex-wrap border-b border-gray-700">
                         <button 
                             onClick={() => setActiveTab('chat')}
                             className={`flex-1 py-3 transition-colors ${
@@ -1447,12 +1758,28 @@ useEffect(() => {
                             Chat
                         </button>
                         <button 
+                            onClick={() => setActiveTab('private')}
+                            className={`flex-1 py-3 transition-colors ${
+                                activeTab === 'private' ? 'text-white bg-gray-700' : 'text-gray-400 hover:text-white'
+                            }`}
+                        >
+                            Private
+                        </button>
+                        <button 
+                            onClick={() => setActiveTab('whiteboard')}
+                            className={`flex-1 py-3 transition-colors ${
+                                activeTab === 'whiteboard' ? 'text-white bg-gray-700' : 'text-gray-400 hover:text-white'
+                            }`}
+                        >
+                            Board
+                        </button>
+                        <button 
                             onClick={() => setActiveTab('participants')}
                             className={`flex-1 py-3 transition-colors ${
                                 activeTab === 'participants' ? 'text-white bg-gray-700' : 'text-gray-400 hover:text-white'
                             }`}
                         >
-                            Participants ({participants.length})
+                            People ({participants.length})
                         </button>
                         {/* Breakout Tab - Only for Instructor */}
                         {user?.userType === 'teacher' && (
@@ -1546,6 +1873,25 @@ useEffect(() => {
             </button>
         </div>
     </>
+) : activeTab === 'private' ? (
+                        <PrivateChatPanel
+                            participants={participants}
+                            currentUserId={mySocketId}
+                            selectedPeerId={selectedPrivatePeerId}
+                            onSelectPeer={handleSelectPrivatePeer}
+                            messages={privateMessages}
+                            onSendMessage={handleSendPrivateMessage}
+                        />
+) : activeTab === 'whiteboard' ? (
+                        <div className="flex-1 overflow-hidden p-4">
+                            <RealtimeWhiteboard
+                                socket={socketRef.current}
+                                classroomId={classroomId}
+                                currentUserId={mySocketId}
+                                currentUserName={user?.name || 'Guest'}
+                                canClear={user?.userType === 'teacher'}
+                            />
+                        </div>
 ) : activeTab === 'participants' ? (
                         <div className="flex-1 overflow-y-auto p-4">
                             <div className="space-y-2">
@@ -1747,7 +2093,7 @@ useEffect(() => {
                                 ? 'bg-purple-600 hover:bg-purple-700' 
                                 : 'bg-gray-600 hover:bg-gray-700'
                         }`}
-                        title={isMetaverseMode ? "Switch to Video View" : "Switch to 3D Metaverse"}
+                        title={user?.userType === 'teacher' ? (isMetaverseMode ? "Move everyone to Video View" : "Move everyone to 3D Classroom") : (isMetaverseMode ? "Switch to Video View" : "Switch to 3D Metaverse")}
                     >
                         {isMetaverseMode ? (
                             <Video className="w-6 h-6 text-white" />
